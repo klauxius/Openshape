@@ -1,0 +1,313 @@
+/* Main container */
+.cadContainer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #ffffff;
+}
+
+/* Header styles */
+.header {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  height: 50px;
+  background-color: #f8f8f8;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.logoSection {
+  display: flex;
+  align-items: center;
+  margin-right: 24px;
+}
+
+.logo {
+  height: 30px;
+  margin-right: 8px;
+}
+
+.documentTitle {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+  font-weight: 500;
+}
+
+.documentType {
+  margin-left: 8px;
+  font-size: 0.85em;
+  color: #666;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: #eee;
+}
+
+.headerControls {
+  display: flex;
+  align-items: center;
+}
+
+.headerButton {
+  margin-left: 8px;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.headerButton:hover {
+  background-color: #f0f0f0;
+}
+
+.shareButton {
+  margin-left: 12px;
+  padding: 6px 12px;
+  background-color: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.shareButton:hover {
+  background-color: #0055b3;
+}
+
+/* Toolbar styles */
+.toolbar {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 8px;
+  background-color: #f0f0f0;
+  border-bottom: 1px solid #ddd;
+  overflow-x: auto;
+}
+
+.toolGroup {
+  display: flex;
+  align-items: center;
+  margin-right: 12px;
+  padding-right: 12px;
+  border-right: 1px solid #ddd;
+}
+
+.toolButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.toolButton span {
+  margin-left: 4px;
+  font-size: 0.85em;
+}
+
+.toolButton:hover {
+  background-color: #e5e5e5;
+  border-color: #ccc;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  padding: 4px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+}
+
+.searchBox input {
+  border: none;
+  outline: none;
+  width: 150px;
+  font-size: 0.85em;
+}
+
+.searchBox button {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+  margin-left: 4px;
+}
+
+/* Main content area */
+.mainContent {
+  display: flex;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+/* Sidebar styles */
+.sidebar {
+  width: 250px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #ddd;
+  background-color: #f8f8f8;
+  overflow-y: auto;
+}
+
+.sidebarFilter {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+}
+
+.sidebarFilter svg {
+  margin-right: 8px;
+  color: #777;
+}
+
+.sidebarFilter input {
+  flex-grow: 1;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.85em;
+}
+
+/* Tree components */
+.treeSection {
+  border-bottom: 1px solid #ddd;
+}
+
+.treeSectionHeader {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.treeSectionHeader:hover {
+  background-color: #eee;
+}
+
+.treeSectionHeader svg {
+  margin-right: 6px;
+  transition: transform 0.2s ease;
+}
+
+.treeContent {
+  padding-left: 16px;
+}
+
+.treeSubSection {
+  margin-bottom: 8px;
+}
+
+.treeSubSectionHeader {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.treeSubSectionHeader svg {
+  margin-right: 6px;
+  transition: transform 0.2s ease;
+}
+
+.treeItems {
+  padding-left: 18px;
+}
+
+.treeItem {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+
+.treeItem:hover {
+  background-color: #eee;
+}
+
+.itemIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+}
+
+.origin svg {
+  color: #555;
+}
+
+.plane svg {
+  color: #0066cc;
+}
+
+.sketch svg {
+  color: #009900;
+}
+
+.extrude svg {
+  color: #cc6600;
+}
+
+.emptyState {
+  padding: 8px;
+  font-size: 0.85em;
+  color: #888;
+  font-style: italic;
+}
+
+/* Viewer container */
+.viewerContainer {
+  flex-grow: 1;
+  position: relative;
+  background-color: #f0f0f0;
+}
+
+/* Coordinate system */
+.coordinateSystem {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.axis {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.axis.x {
+  color: #cc0000;
+  transform: translateX(20px);
+}
+
+.axis.y {
+  color: #00cc00;
+  transform: translateY(-20px);
+}
+
+.axis.z {
+  color: #0000cc;
+  transform: translateZ(20px);
+} 

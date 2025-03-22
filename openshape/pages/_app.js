@@ -1,7 +1,12 @@
 import '../styles/globals.css'
+import { UnitProvider } from '../contexts/UnitContext'
 
 function MyApp({ Component, pageProps }) {
-  return <Component {...pageProps} />
+  return (
+    <UnitProvider>
+      <Component {...pageProps} />
+    </UnitProvider>
+  )
 }
 
 export default MyApp 

@@ -181,23 +181,28 @@ export default function ViewCube({
           const ctx = canvas.getContext('2d');
           
           // Draw text
-          ctx.fillStyle = '#000000';
+          ctx.fillStyle = '#000000'; // Keep black for best contrast
           ctx.font = 'bold 32px Arial';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillText(text, 32, 32);
+          
+          // Add an outline to the text for better visibility
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.strokeText(text, 32, 32);
           
           // Create texture and material
           const texture = new THREE.CanvasTexture(canvas);
           const material = new THREE.SpriteMaterial({ 
             map: texture,
             transparent: true,
-            opacity: 0.9
+            opacity: 1.0  // Increased opacity for better visibility
           });
           
           // Create sprite and position it
           const sprite = new THREE.Sprite(material);
-          sprite.scale.set(0.5, 0.5, 0.5);
+          sprite.scale.set(0.6, 0.6, 0.6);  // Slightly larger for better visibility
           sprite.position.set(...position);
           
           cube.add(sprite);

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Head from "next/head"
 import dynamic from "next/dynamic"
 import {
@@ -27,9 +27,37 @@ import {
   ZoomOut,
   Move,
 } from "lucide-react"
+import { useUnits } from '../contexts/UnitContext'
+
+// Placeholder component for JscadThreeViewer
+const PlaceholderViewer = () => {
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center bg-gray-100">
+      <div className="p-6 bg-white rounded-lg shadow-md text-center">
+        <div className="w-16 h-16 mx-auto mb-4 text-blue-600">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5"
+            />
+          </svg>
+        </div>
+        <h3 className="text-lg font-medium text-gray-900 mb-2">3D Viewer Placeholder</h3>
+        <p className="text-sm text-gray-600 mb-4">The actual 3D viewer component will be rendered here.</p>
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <div className="h-16 bg-gray-200 rounded"></div>
+          <div className="h-16 bg-gray-200 rounded"></div>
+          <div className="h-16 bg-gray-200 rounded"></div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // Import the Three.js viewer component with SSR disabled
-const JscadThreeViewer = dynamic(() => import("../components/JscadThreeViewer"), {
+const JscadThreeViewer = dynamic(() => import('../components/JscadThreeViewer'), {
   ssr: false,
   loading: () => <div className="flex items-center justify-center h-full">Loading 3D viewer...</div>,
 })
@@ -41,6 +69,14 @@ export default function CadInterface() {
   const [expandedDefaultGeometry, setExpandedDefaultGeometry] = useState(true)
   const [activeTab, setActiveTab] = useState("sketch")
   const [viewMode, setViewMode] = useState("shaded")
+  const [showGuide, setShowGuide] = useState(false)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [showExportDialog, setShowExportDialog] = useState(false)
+  const [activeModel, setActiveModel] = useState(null)
+  const [projectName, setProjectName] = useState("Untitled Model")
+  const [isEditingName, setIsEditingName] = useState(false)
+  const projectNameInputRef = useRef(null)
+  const { unitSystem } = useUnits()
 
   // Fake data for the UI mockup
   const featureItems = [
@@ -131,6 +167,48 @@ export default function CadInterface() {
     },
   ]
 
+  const toggleUserGuide = () => {
+    setShowGuide(!showGuide)
+  }
+
+  const handleImportClick = () => {
+    setShowImportDialog(true)
+  }
+
+  const handleExportClick = () => {
+    setShowExportDialog(true)
+  }
+
+  const handleModelImported = (model) => {
+    console.log('Model imported:', model)
+    setActiveModel(model)
+  }
+
+  const handleProjectNameDoubleClick = () => {
+    setIsEditingName(true)
+  }
+
+  const handleProjectNameChange = (e) => {
+    setProjectName(e.target.value)
+  }
+
+  const handleProjectNameKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      setIsEditingName(false)
+    }
+  }
+
+  const handleProjectNameBlur = () => {
+    setIsEditingName(false)
+  }
+
+  useEffect(() => {
+    if (isEditingName && projectNameInputRef.current) {
+      projectNameInputRef.current.focus()
+      projectNameInputRef.current.select()
+    }
+  }, [isEditingName])
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -142,8 +220,8 @@ export default function CadInterface() {
   return (
     <>
       <Head>
-        <title>Browser CAD</title>
-        <meta name="description" content="Professional browser-based CAD software" />
+        <title>OpenShape CAD Interface</title>
+        <meta name="description" content="OpenShape - Free and Open Source 3D CAD in the browser" />
         <style jsx global>{`
           html, body {
             margin: 0;
@@ -180,11 +258,29 @@ export default function CadInterface() {
                 <path d="M2 12l10 5 10-5" />
               </svg>
             </div>
-            <span className="font-medium text-gray-700">Browser CAD</span>
+            <span className="font-medium text-gray-700">OpenShape CAD</span>
           </div>
 
           <div className="flex items-center space-x-1 px-2 border-l border-r border-gray-200">
-            <span className="font-medium text-gray-800">Lacing Table</span>
+            {isEditingName ? (
+              <input
+                ref={projectNameInputRef}
+                type="text"
+                className="font-medium text-gray-800 bg-gray-100 px-1 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                value={projectName}
+                onChange={handleProjectNameChange}
+                onKeyDown={handleProjectNameKeyDown}
+                onBlur={handleProjectNameBlur}
+              />
+            ) : (
+              <span 
+                className="font-medium text-gray-800 px-1 py-0.5 hover:bg-gray-100 rounded cursor-pointer" 
+                onDoubleClick={handleProjectNameDoubleClick}
+                title="Double-click to edit"
+              >
+                {projectName}
+              </span>
+            )}
             <span className="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Main</span>
             <button className="p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded">
               <Link size={14} />
@@ -192,7 +288,10 @@ export default function CadInterface() {
           </div>
 
           <div className="flex items-center ml-auto space-x-1">
-            <button className="flex items-center justify-center w-8 h-8 text-gray-600 hover:bg-gray-100 rounded">
+            <button 
+              className="flex items-center justify-center w-8 h-8 text-gray-600 hover:bg-gray-100 rounded"
+              onClick={toggleUserGuide}
+            >
               <Info size={16} />
             </button>
             <div className="flex items-center border border-gray-300 rounded overflow-hidden">
@@ -455,7 +554,9 @@ export default function CadInterface() {
 
           {/* 3D Viewer */}
           <div className="relative flex-1 bg-gray-100">
-            <JscadThreeViewer />
+            <JscadThreeViewer 
+              onModelChange={setActiveModel}
+            />
 
             {/* Coordinate system indicator */}
             <div className="absolute right-4 bottom-4 w-20 h-20 flex items-center justify-center bg-white bg-opacity-80 rounded-full shadow-md">
@@ -474,23 +575,33 @@ export default function CadInterface() {
                 <line x1="50" y1="50" x2="70" y2="70" stroke="blue" strokeWidth="2" />
               </svg>
             </div>
-
-            {/* Status bar */}
-            <div className="absolute left-0 right-0 bottom-0 flex items-center justify-between px-3 py-1 bg-gray-800 bg-opacity-80 text-white text-xs">
-              <div className="flex items-center space-x-4">
-                <span>X: 0.00</span>
-                <span>Y: 0.00</span>
-                <span>Z: 0.00</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span>{viewMode.charAt(0).toUpperCase() + viewMode.slice(1)}</span>
-                <span>|</span>
-                <span>Units: mm</span>
-              </div>
-            </div>
           </div>
         </div>
       </div>
+
+      {/* Modals and dialogs */}
+      {showGuide && (
+        <div className="fixed inset-0" onClick={toggleUserGuide}>
+          <div className="absolute inset-0 bg-black bg-opacity-40"></div>
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+            <div className="bg-white p-6 rounded-lg shadow-lg max-w-2xl">
+              <h2 className="text-xl font-bold mb-4">OpenShape CAD User Guide</h2>
+              <p className="mb-2">
+                Use this interface to create and edit 3D models for your CAD projects.
+              </p>
+              <button
+                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none"
+                onClick={toggleUserGuide}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Import/Export Dialogs */}
+      <div id="modal-container"></div>
     </>
   )
 }

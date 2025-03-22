@@ -3,6 +3,10 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import * as jscad from '@jscad/modeling';
 import ViewCube from './ViewCube';
+import ExportModelDialog from './ExportModelDialog';
+import ImportModelDialog from './ImportModelDialog';
+import UnitSelector from './UnitSelector';
+import { useUnits } from '../contexts/UnitContext';
 
 // Import JSCAD primitives and operations
 const { primitives, transforms, booleans } = jscad;
@@ -106,6 +110,13 @@ function JscadThreeScene() {
   const [modelType, setModelType] = useState('cube');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [currentGeometry, setCurrentGeometry] = useState(null);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0, z: 0 });
+  
+  // Get unit system from context
+  const { unitSystem, setUnitSystem, format } = useUnits();
   
   // Store references to Three.js objects for view controls
   const sceneRef = useRef(null);
@@ -308,6 +319,9 @@ function JscadThreeScene() {
           jscadGeometry = sphere({ radius: 3, segments: 32 });
         }
         
+        // Store the current geometry for export functionality
+        setCurrentGeometry(jscadGeometry);
+        
         // Colorize the geometry with greyish-blue color
         // [R, G, B] values from 0-1, creating a professional greyish-blue tone
         const colorized = colorize([0.4, 0.5, 0.6], jscadGeometry);
@@ -327,70 +341,6 @@ function JscadThreeScene() {
         const mesh = new THREE.Mesh(threeGeometry, material);
         scene.add(mesh);
         
-        // Set up event listeners for keyboard shortcuts
-        const handleKeyDown = (event) => {
-          // Skip if user is typing in an input field
-          if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
-            return;
-          }
-          
-          switch (event.key) {
-            case '1':
-              // Front view
-              setFrontView();
-              break;
-            case '2':
-              // Back view
-              if (cameraRef.current && controlsRef.current) {
-                cameraRef.current.position.set(0, 0, -15);
-                cameraRef.current.lookAt(0, 0, 0);
-                controlsRef.current.update();
-              }
-              break;
-            case '3':
-              // Top view
-              setTopView();
-              break;
-            case '4':
-              // Bottom view
-              if (cameraRef.current && controlsRef.current) {
-                cameraRef.current.position.set(0, -15, 0);
-                cameraRef.current.lookAt(0, 0, 0);
-                controlsRef.current.update();
-              }
-              break;
-            case '5':
-              // Right view
-              setRightView();
-              break;
-            case '6':
-              // Left view
-              if (cameraRef.current && controlsRef.current) {
-                cameraRef.current.position.set(-15, 0, 0);
-                cameraRef.current.lookAt(0, 0, 0);
-                controlsRef.current.update();
-              }
-              break;
-            case '7':
-              // Isometric view
-              setIsometricView();
-              break;
-            case 'f':
-            case 'F':
-              // Fit view to model
-              if (cameraRef.current && controlsRef.current) {
-                // Reset to isometric for simplicity
-                setIsometricView();
-              }
-              break;
-            default:
-              break;
-          }
-        };
-        
-        // Add keyboard event listener
-        window.addEventListener('keydown', handleKeyDown);
-        
         // Configure touch controls
         controls.touches = {
           ONE: THREE.TOUCH.ROTATE,
@@ -400,6 +350,36 @@ function JscadThreeScene() {
         // Improve touch sensitivity
         controls.touchRotateSpeed = 1.0;
         controls.screenSpacePanning = true; // Panning relative to cursor instead of camera
+        
+        // Add a raycaster for mouse position tracking
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        
+        // Track mouse position
+        const onMouseMove = (event) => {
+          // Calculate mouse position in normalized device coordinates
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+          
+          // Update the picking ray with the camera and mouse position
+          raycaster.setFromCamera(mouse, camera);
+          
+          // Calculate objects intersecting the picking ray
+          const intersects = raycaster.intersectObjects(scene.children, true);
+          
+          if (intersects.length > 0) {
+            // Get the intersection point coordinates
+            const point = intersects[0].point;
+            setMousePosition({
+              x: point.x,
+              y: point.y,
+              z: point.z
+            });
+          }
+        };
+        
+        renderer.domElement.addEventListener('mousemove', onMouseMove);
         
         // Animation loop
         const animate = () => {
@@ -453,7 +433,7 @@ function JscadThreeScene() {
         // Return cleanup function
         return () => {
           window.removeEventListener('resize', handleResize);
-          window.removeEventListener('keydown', handleKeyDown);
+          renderer.domElement.removeEventListener('mousemove', onMouseMove);
           cleanup();
         };
       } catch (error) {
@@ -503,6 +483,26 @@ function JscadThreeScene() {
     }
   };
 
+  const handleImport = (importedData) => {
+    // Handle the imported model data
+    console.log('Imported model:', importedData);
+    
+    if (importedData.type === 'json' && importedData.geometry) {
+      // If we have valid JSON geometry, we could apply it
+      // This would require additional processing to convert to JSCAD format
+      // For now, just log that we'd use this data
+      console.log('Would apply imported JSON geometry');
+    } else if (importedData.type === 'stl' && importedData.rawData) {
+      // For STL, we would need a proper parser
+      console.log('Would parse and apply STL data');
+    }
+  };
+
+  // Handle unit system change
+  const handleUnitChange = (newUnitSystem) => {
+    setUnitSystem(newUnitSystem);
+  };
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       {loading && (
@@ -525,6 +525,19 @@ function JscadThreeScene() {
         </div>
       )}
       
+      {/* Import/Export Dialogs */}
+      <ExportModelDialog 
+        isOpen={showExportDialog} 
+        onClose={() => setShowExportDialog(false)} 
+        geometry={currentGeometry} 
+      />
+      
+      <ImportModelDialog 
+        isOpen={showImportDialog} 
+        onClose={() => setShowImportDialog(false)} 
+        onImport={handleImport} 
+      />
+      
       {/* Model Controls */}
       <div style={{ 
         position: 'absolute', 
@@ -533,7 +546,8 @@ function JscadThreeScene() {
         zIndex: 10,
         display: 'flex',
         alignItems: 'center',
-        gap: '10px'
+        gap: '10px',
+        color: '#333'
       }}>
         <select 
           value={modelType} 
@@ -541,7 +555,8 @@ function JscadThreeScene() {
           style={{
             padding: '5px 10px',
             borderRadius: '4px',
-            border: '1px solid #ccc'
+            border: '1px solid #ccc',
+            color: '#333'
           }}
         >
           <option value="cube">Cube</option>
@@ -567,6 +582,58 @@ function JscadThreeScene() {
           <span style={{ fontWeight: 'bold' }}>Navigation: </span>
           <span title="Industry standard CAD navigation">Middle/Left Mouse: Rotate | Right Mouse: Pan | Scroll: Zoom</span>
         </div>
+        
+        {/* Import/Export Buttons */}
+        <div style={{ display: 'flex', gap: '5px' }}>
+          <button
+            onClick={() => setShowImportDialog(true)}
+            style={{
+              padding: '5px 10px',
+              borderRadius: '4px',
+              border: '1px solid #ccc',
+              background: '#fff',
+              cursor: 'pointer',
+              fontSize: '12px',
+              color: '#333',
+              display: 'flex',
+              alignItems: 'center'
+            }}
+            title="Import Model"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style={{ marginRight: '4px' }}>
+              <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm3.5 7.5a.5.5 0 0 1 0 1H5.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L5.707 7.5H11.5z"/>
+            </svg>
+            Import
+          </button>
+          
+          <button
+            onClick={() => setShowExportDialog(true)}
+            disabled={!currentGeometry}
+            style={{
+              padding: '5px 10px',
+              borderRadius: '4px',
+              border: '1px solid #ccc',
+              background: '#fff',
+              cursor: currentGeometry ? 'pointer' : 'not-allowed',
+              fontSize: '12px',
+              color: currentGeometry ? '#333' : '#999',
+              display: 'flex',
+              alignItems: 'center'
+            }}
+            title="Export Model"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style={{ marginRight: '4px' }}>
+              <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0zm3.5 7.5a.5.5 0 0 0 0 1H5.707l2.147 2.146a.5.5 0 0 0-.708.708l-3-3a.5.5 0 0 0 0-.708l3-3a.5.5 0 1 0 .708.708L5.707 7.5H11.5z"/>
+            </svg>
+            Export
+          </button>
+        </div>
+        
+        {/* Unit Selector */}
+        <UnitSelector 
+          currentUnit={unitSystem}
+          onUnitChange={handleUnitChange}
+        />
       </div>
       
       {/* View Controls */}
@@ -576,7 +643,8 @@ function JscadThreeScene() {
         right: '10px', 
         zIndex: 10,
         display: 'flex',
-        gap: '5px'
+        gap: '5px',
+        color: '#333'
       }}>
         <button 
           onClick={setFrontView}
@@ -589,9 +657,10 @@ function JscadThreeScene() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '12px'
+            fontSize: '12px',
+            color: '#333'
           }}
-          title="Front View (1)"
+          title="Front View"
         >
           Front
         </button>
@@ -607,9 +676,10 @@ function JscadThreeScene() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '12px'
+            fontSize: '12px',
+            color: '#333'
           }}
-          title="Top View (3)"
+          title="Top View"
         >
           Top
         </button>
@@ -625,9 +695,10 @@ function JscadThreeScene() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '12px'
+            fontSize: '12px',
+            color: '#333'
           }}
-          title="Right View (5)"
+          title="Right View"
         >
           Right
         </button>
@@ -643,29 +714,13 @@ function JscadThreeScene() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '12px'
+            fontSize: '12px',
+            color: '#333'
           }}
-          title="Isometric View (7)"
+          title="Isometric View"
         >
           Iso
         </button>
-      </div>
-      
-      {/* Keyboard Shortcuts Panel */}
-      <div style={{
-        position: 'absolute',
-        bottom: '10px',
-        left: '10px',
-        zIndex: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.8)',
-        padding: '5px',
-        borderRadius: '4px',
-        border: '1px solid #ddd',
-        fontSize: '11px',
-        color: '#555'
-      }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '3px' }}>Keyboard Shortcuts</div>
-        <div>1-6: Standard Views | 7: Isometric | F: Fit</div>
       </div>
       
       {/* ViewCube component for 3D orientation */}
@@ -681,6 +736,30 @@ function JscadThreeScene() {
         ref={mountRef} 
         style={{ width: '100%', height: '100%' }}
       />
+      
+      {/* Status bar with coordinates in the selected unit system */}
+      <div style={{ 
+        position: 'absolute',
+        left: '0',
+        right: '0',
+        bottom: '0',
+        background: 'rgba(33, 33, 33, 0.8)',
+        color: 'white',
+        padding: '6px 12px',
+        fontSize: '12px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        zIndex: 5
+      }}>
+        <div style={{ display: 'flex', gap: '16px' }}>
+          <span>X: {format(mousePosition.x)}</span>
+          <span>Y: {format(mousePosition.y)}</span>
+          <span>Z: {format(mousePosition.z)}</span>
+        </div>
+        <div>
+          <span>Units: {unitSystem.name}</span>
+        </div>
+      </div>
     </div>
   );
 }

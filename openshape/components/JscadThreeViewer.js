@@ -1,6 +1,16 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import * as jscad from '@jscad/modeling';
+import ViewCube from './ViewCube';
+
+// Import JSCAD primitives and operations
+const { primitives, transforms, booleans } = jscad;
+const { cube, sphere, cylinder, rectangle } = primitives;
+const { translate, rotate, scale } = transforms;
+const { subtract, union } = booleans;
+const { extrudeLinear } = jscad.extrusions;
+const { colorize } = jscad.colors;
 
 // Error boundary component
 class ErrorBoundary extends React.Component {
@@ -14,7 +24,7 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('Error in JSCAD-Three component:', error, errorInfo);
+    console.error('Error in JSCAD component:', error, errorInfo);
   }
 
   render() {
@@ -92,9 +102,14 @@ function jscadToThreeGeometry(jscadGeometry) {
 
 function JscadThreeScene() {
   const mountRef = useRef(null);
+  const controlsRef = useRef(null);
   const [modelType, setModelType] = useState('cube');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Store references to Three.js objects for view controls
+  const sceneRef = useRef(null);
+  const cameraRef = useRef(null);
 
   useEffect(() => {
     // Early return if the ref isn't set yet
@@ -122,7 +137,8 @@ function JscadThreeScene() {
         
         // Initialize Three.js
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xf5f5f5);
+        scene.background = new THREE.Color(0xf2f4f7); // Subtle light grey-blue background
+        sceneRef.current = scene;
         
         // Get dimensions
         const width = mountRef.current.clientWidth;
@@ -132,6 +148,7 @@ function JscadThreeScene() {
         const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
         camera.position.set(15, 15, 15);
         camera.lookAt(0, 0, 0);
+        cameraRef.current = camera;
         
         // Create renderer
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -143,6 +160,28 @@ function JscadThreeScene() {
         controls.enableDamping = true;
         controls.dampingFactor = 0.25;
         
+        // Configure mouse buttons for standard CAD interaction
+        controls.mouseButtons = {
+          LEFT: THREE.MOUSE.ROTATE,      // Left mouse button: Rotate
+          MIDDLE: THREE.MOUSE.ROTATE,    // Middle mouse button: Rotate (industry standard)
+          RIGHT: THREE.MOUSE.PAN         // Right mouse button: Pan
+        };
+        
+        // Enable zoom with mouse wheel
+        controls.enableZoom = true;
+        controls.zoomSpeed = 1.2;
+        
+        // Adjust rotation and pan speed
+        controls.rotateSpeed = 1.0;
+        controls.panSpeed = 1.2;
+        
+        // Set limits for better user experience
+        controls.minDistance = 2;       // Prevent zooming too close
+        controls.maxDistance = 100;     // Prevent zooming too far
+        
+        // Save controls reference for external access
+        controlsRef.current = controls;
+        
         // Add lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
@@ -151,9 +190,13 @@ function JscadThreeScene() {
         directionalLight.position.set(2, 4, 3);
         scene.add(directionalLight);
         
-        // Add a grid helper
-        const gridHelper = new THREE.GridHelper(20, 20);
+        // Add a grid helper with colors matching the design theme
+        const gridHelper = new THREE.GridHelper(20, 20, 0x8c9cb0, 0xd9dee6);
         scene.add(gridHelper);
+        
+        // Add axes helper - shows XYZ axes with standard colors
+        const axesHelper = new THREE.AxesHelper(10);
+        scene.add(axesHelper);
         
         // Create geometry based on model type
         let jscadGeometry;
@@ -265,23 +308,98 @@ function JscadThreeScene() {
           jscadGeometry = sphere({ radius: 3, segments: 32 });
         }
         
-        // Colorize the geometry
-        const colorized = colorize([0.1, 0.4, 0.9], jscadGeometry);
+        // Colorize the geometry with greyish-blue color
+        // [R, G, B] values from 0-1, creating a professional greyish-blue tone
+        const colorized = colorize([0.4, 0.5, 0.6], jscadGeometry);
         
         // Convert JSCAD geometry to Three.js geometry
         const threeGeometry = jscadToThreeGeometry(colorized);
         
-        // Create material
+        // Create material with matching greyish-blue color
         const material = new THREE.MeshStandardMaterial({
-          color: 0x0088ff,
-          metalness: 0.1,
-          roughness: 0.5,
+          color: 0x6682a0,  // Hexadecimal equivalent of greyish-blue
+          metalness: 0.2,
+          roughness: 0.4,
           side: THREE.DoubleSide
         });
         
         // Create mesh and add to scene
         const mesh = new THREE.Mesh(threeGeometry, material);
         scene.add(mesh);
+        
+        // Set up event listeners for keyboard shortcuts
+        const handleKeyDown = (event) => {
+          // Skip if user is typing in an input field
+          if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+            return;
+          }
+          
+          switch (event.key) {
+            case '1':
+              // Front view
+              setFrontView();
+              break;
+            case '2':
+              // Back view
+              if (cameraRef.current && controlsRef.current) {
+                cameraRef.current.position.set(0, 0, -15);
+                cameraRef.current.lookAt(0, 0, 0);
+                controlsRef.current.update();
+              }
+              break;
+            case '3':
+              // Top view
+              setTopView();
+              break;
+            case '4':
+              // Bottom view
+              if (cameraRef.current && controlsRef.current) {
+                cameraRef.current.position.set(0, -15, 0);
+                cameraRef.current.lookAt(0, 0, 0);
+                controlsRef.current.update();
+              }
+              break;
+            case '5':
+              // Right view
+              setRightView();
+              break;
+            case '6':
+              // Left view
+              if (cameraRef.current && controlsRef.current) {
+                cameraRef.current.position.set(-15, 0, 0);
+                cameraRef.current.lookAt(0, 0, 0);
+                controlsRef.current.update();
+              }
+              break;
+            case '7':
+              // Isometric view
+              setIsometricView();
+              break;
+            case 'f':
+            case 'F':
+              // Fit view to model
+              if (cameraRef.current && controlsRef.current) {
+                // Reset to isometric for simplicity
+                setIsometricView();
+              }
+              break;
+            default:
+              break;
+          }
+        };
+        
+        // Add keyboard event listener
+        window.addEventListener('keydown', handleKeyDown);
+        
+        // Configure touch controls
+        controls.touches = {
+          ONE: THREE.TOUCH.ROTATE,
+          TWO: THREE.TOUCH.DOLLY_PAN
+        };
+        
+        // Improve touch sensitivity
+        controls.touchRotateSpeed = 1.0;
+        controls.screenSpacePanning = true; // Panning relative to cursor instead of camera
         
         // Animation loop
         const animate = () => {
@@ -335,6 +453,7 @@ function JscadThreeScene() {
         // Return cleanup function
         return () => {
           window.removeEventListener('resize', handleResize);
+          window.removeEventListener('keydown', handleKeyDown);
           cleanup();
         };
       } catch (error) {
@@ -351,44 +470,71 @@ function JscadThreeScene() {
     setModelType(event.target.value);
   };
 
+  // Set standard view functions
+  const setFrontView = () => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.set(0, 0, 15);
+      cameraRef.current.lookAt(0, 0, 0);
+      controlsRef.current.update();
+    }
+  };
+
+  const setTopView = () => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.set(0, 15, 0);
+      cameraRef.current.lookAt(0, 0, 0);
+      controlsRef.current.update();
+    }
+  };
+
+  const setRightView = () => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.set(15, 0, 0);
+      cameraRef.current.lookAt(0, 0, 0);
+      controlsRef.current.update();
+    }
+  };
+
+  const setIsometricView = () => {
+    if (cameraRef.current && controlsRef.current) {
+      cameraRef.current.position.set(15, 15, 15);
+      cameraRef.current.lookAt(0, 0, 0);
+      controlsRef.current.update();
+    }
+  };
+
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       {loading && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'rgba(255,255,255,0.8)',
-          zIndex: 10
-        }}>
-          <p>Loading JSCAD model...</p>
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+          Loading...
         </div>
       )}
       
       {error && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
+        <div style={{ 
+          position: 'absolute', 
+          top: '50%', 
+          left: '50%', 
           transform: 'translate(-50%, -50%)',
-          padding: '15px',
+          padding: '10px',
           backgroundColor: '#fff0f0',
-          color: '#800',
-          border: '1px solid #f00',
-          borderRadius: '4px',
-          zIndex: 20
+          border: '1px solid #f00'
         }}>
-          <h3>Error rendering model</h3>
-          <p>{error}</p>
+          {error}
         </div>
       )}
       
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 5 }}>
+      {/* Model Controls */}
+      <div style={{ 
+        position: 'absolute', 
+        top: '10px', 
+        left: '10px', 
+        zIndex: 10,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px'
+      }}>
         <select 
           value={modelType} 
           onChange={handleModelChange}
@@ -399,7 +545,6 @@ function JscadThreeScene() {
           }}
         >
           <option value="cube">Cube</option>
-          <option value="sphere">Sphere</option>
           <option value="cylinder">Cylinder</option>
           <option value="complex">Complex (Subtract)</option>
           <option value="fixed-complex">Better Complex (Subtract)</option>
@@ -408,7 +553,129 @@ function JscadThreeScene() {
           <option value="rotated">Rotated</option>
           <option value="advanced">Advanced CSG</option>
         </select>
+        
+        {/* Navigation Help */}
+        <div style={{
+          fontSize: '12px',
+          color: '#555',
+          backgroundColor: 'rgba(255, 255, 255, 0.8)',
+          padding: '4px 8px',
+          borderRadius: '4px',
+          border: '1px solid #ddd',
+          display: 'inline-block'
+        }}>
+          <span style={{ fontWeight: 'bold' }}>Navigation: </span>
+          <span title="Industry standard CAD navigation">Middle/Left Mouse: Rotate | Right Mouse: Pan | Scroll: Zoom</span>
+        </div>
       </div>
+      
+      {/* View Controls */}
+      <div style={{ 
+        position: 'absolute', 
+        top: '10px', 
+        right: '10px', 
+        zIndex: 10,
+        display: 'flex',
+        gap: '5px'
+      }}>
+        <button 
+          onClick={setFrontView}
+          style={{
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: '1px solid #ccc',
+            background: '#fff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '12px'
+          }}
+          title="Front View (1)"
+        >
+          Front
+        </button>
+        
+        <button 
+          onClick={setTopView}
+          style={{
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: '1px solid #ccc',
+            background: '#fff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '12px'
+          }}
+          title="Top View (3)"
+        >
+          Top
+        </button>
+        
+        <button 
+          onClick={setRightView}
+          style={{
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: '1px solid #ccc',
+            background: '#fff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '12px'
+          }}
+          title="Right View (5)"
+        >
+          Right
+        </button>
+        
+        <button 
+          onClick={setIsometricView}
+          style={{
+            padding: '5px 10px',
+            borderRadius: '4px',
+            border: '1px solid #ccc',
+            background: '#fff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '12px'
+          }}
+          title="Isometric View (7)"
+        >
+          Iso
+        </button>
+      </div>
+      
+      {/* Keyboard Shortcuts Panel */}
+      <div style={{
+        position: 'absolute',
+        bottom: '10px',
+        left: '10px',
+        zIndex: 10,
+        backgroundColor: 'rgba(255, 255, 255, 0.8)',
+        padding: '5px',
+        borderRadius: '4px',
+        border: '1px solid #ddd',
+        fontSize: '11px',
+        color: '#555'
+      }}>
+        <div style={{ fontWeight: 'bold', marginBottom: '3px' }}>Keyboard Shortcuts</div>
+        <div>1-6: Standard Views | 7: Isometric | F: Fit</div>
+      </div>
+      
+      {/* ViewCube component for 3D orientation */}
+      {cameraRef.current && controlsRef.current && (
+        <ViewCube 
+          cameraRef={cameraRef} 
+          controlsRef={controlsRef}
+          position={{ right: '20px', top: '60px' }}
+        />
+      )}
       
       <div 
         ref={mountRef} 

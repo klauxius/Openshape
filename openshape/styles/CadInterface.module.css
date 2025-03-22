@@ -281,11 +281,15 @@
   position: absolute;
   right: 16px;
   bottom: 16px;
-  width: 60px;
-  height: 60px;
+  width: 80px;
+  height: 80px;
   display: flex;
   justify-content: center;
   align-items: center;
+  background-color: rgba(240, 240, 240, 0.5);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+  pointer-events: none; /* Prevent blocking clicks on the 3D view */
 }
 
 .axis {
@@ -294,20 +298,25 @@
   justify-content: center;
   align-items: center;
   font-weight: bold;
-  font-size: 12px;
+  font-size: 14px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.2);
 }
 
 .axis.x {
-  color: #cc0000;
-  transform: translateX(20px);
+  color: #ff0000; /* Red for X axis (standard in Three.js) */
+  transform: translateX(30px);
 }
 
 .axis.y {
-  color: #00cc00;
-  transform: translateY(-20px);
+  color: #00ff00; /* Green for Y axis (standard in Three.js) */
+  transform: translateY(-30px);
 }
 
 .axis.z {
-  color: #0000cc;
-  transform: translateZ(20px);
+  color: #0000ff; /* Blue for Z axis (standard in Three.js) */
+  transform: translate(15px, 15px); /* Angled position to represent Z coming toward viewer */
 } 

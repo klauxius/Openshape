@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import * as jscad from '@jscad/modeling';
-import ViewCube from './ViewCube';
+import DomViewCube from './DomViewCube';
 import ExportModelDialog from './ExportModelDialog';
 import ImportModelDialog from './ImportModelDialog';
 import UnitSelector from './UnitSelector';
@@ -713,11 +713,11 @@ function JscadThreeScene() {
         style={{ touchAction: 'none', cursor: measurementMode ? 'crosshair' : 'grab' }}
       />
 
-      {/* View cube */}
-      <ViewCube 
+      {/* DOM-based ViewCube component */}
+      <DomViewCube 
         cameraRef={cameraRef}
         controlsRef={controlsRef}
-        size={80}
+        size={100}
         position={{ top: '60px', right: '20px' }}
       />
 

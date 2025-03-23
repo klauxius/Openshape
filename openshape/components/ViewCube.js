@@ -12,25 +12,34 @@ export default function ViewCube({
   size = 100,
   position = { right: '20px', top: '20px' }
 }) {
-  console.log('ViewCube component rendering', { 
+  console.log('[DEBUG] ViewCube component rendering', { 
     hasCamera: !!cameraRef?.current, 
-    hasControls: !!controlsRef?.current
+    hasControls: !!controlsRef?.current,
+    size,
+    position
   });
 
   // Integrated ViewCube - adds a view cube directly to the main scene
   useEffect(() => {
+    console.log('[DEBUG] ViewCube useEffect running', { 
+      hasCamera: !!cameraRef?.current, 
+      hasControls: !!controlsRef?.current
+    });
+    
     if (!cameraRef?.current || !controlsRef?.current) {
-      console.warn('ViewCube: Missing camera or controls refs');
+      console.warn('[DEBUG] ViewCube: Missing camera or controls refs');
       return;
     }
     
-    console.log('ViewCube: Setting up integrated view cube');
+    console.log('[DEBUG] ViewCube: Setting up integrated view cube');
     
     try {
       // Get the main scene from the camera
       const mainScene = cameraRef.current.parent;
+      console.log('[DEBUG] ViewCube: Main scene', mainScene);
+      
       if (!mainScene) {
-        console.warn('ViewCube: Cannot access main scene');
+        console.warn('[DEBUG] ViewCube: Cannot access main scene');
         return;
       }
       
@@ -39,29 +48,30 @@ export default function ViewCube({
       viewCubeGroup.name = 'viewCubeGroup';
       
       // Position the view cube in the top-right corner of the view
-      viewCubeGroup.position.set(7, 7, 7); // Adjusted position for better visibility
-      viewCubeGroup.scale.set(1.2, 1.2, 1.2); // Increased size for better visibility
+      viewCubeGroup.position.set(10, 10, 10); // Larger position values for better visibility
+      viewCubeGroup.scale.set(2, 2, 2); // Much larger size for better visibility
       
       // Create the cube geometry slightly smaller than the standard cube
       const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
       
       // Create materials for each face with different colors for better orientation
       const cubeMaterials = [
-        new THREE.MeshBasicMaterial({ color: 0xd2d8e1, transparent: true, opacity: 0.9 }), // right - x+ (lighter grey-blue)
-        new THREE.MeshBasicMaterial({ color: 0xc0cad9, transparent: true, opacity: 0.9 }), // left - x- (lighter grey-blue)
-        new THREE.MeshBasicMaterial({ color: 0xe1e8f0, transparent: true, opacity: 0.9 }), // top - y+ (lighter grey-blue)
-        new THREE.MeshBasicMaterial({ color: 0xb3bfcf, transparent: true, opacity: 0.9 }), // bottom - y- (lighter grey-blue)
-        new THREE.MeshBasicMaterial({ color: 0xd8e0ec, transparent: true, opacity: 0.9 }), // front - z+ (lighter grey-blue)
-        new THREE.MeshBasicMaterial({ color: 0xadbcd0, transparent: true, opacity: 0.9 })  // back - z- (lighter grey-blue)
+        new THREE.MeshBasicMaterial({ color: 0xef5350, transparent: true, opacity: 0.95 }), // right - x+ (red)
+        new THREE.MeshBasicMaterial({ color: 0xec407a, transparent: true, opacity: 0.95 }), // left - x- (pink)
+        new THREE.MeshBasicMaterial({ color: 0x66bb6a, transparent: true, opacity: 0.95 }), // top - y+ (green)
+        new THREE.MeshBasicMaterial({ color: 0x26a69a, transparent: true, opacity: 0.95 }), // bottom - y- (teal)
+        new THREE.MeshBasicMaterial({ color: 0x42a5f5, transparent: true, opacity: 0.95 }), // front - z+ (blue)
+        new THREE.MeshBasicMaterial({ color: 0x7e57c2, transparent: true, opacity: 0.95 })  // back - z- (purple)
       ];
       
       // Create the cube with materials
       const cube = new THREE.Mesh(cubeGeometry, cubeMaterials);
       cube.name = 'viewCube';
+      console.log('[DEBUG] ViewCube: Created cube mesh');
       
       // Add edges to the cube for better visibility
       const edgesGeometry = new THREE.EdgesGeometry(cubeGeometry);
-      const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x000000 });
+      const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 }); // Thicker lines
       const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
       edges.name = 'viewCubeEdges';
       cube.add(edges);
@@ -79,6 +89,7 @@ export default function ViewCube({
       
       // Add the view cube group to the scene
       mainScene.add(viewCubeGroup);
+      console.log('[DEBUG] ViewCube: Added to scene', viewCubeGroup);
       
       // Set up raycaster for click detection
       const raycaster = new THREE.Raycaster();
@@ -86,6 +97,7 @@ export default function ViewCube({
       
       // Add click event listener to the renderer's domElement
       const rendererEl = controlsRef.current.domElement;
+      console.log('[DEBUG] ViewCube: Using renderer element', rendererEl);
       
       const onDocumentMouseDown = (event) => {
         try {

@@ -122,11 +122,41 @@ class SketchManager {
     this.activeSketch = sketch;
     this.isInSketchMode = true;
     
-    // Dispatch event to notify of sketch creation
+    // Determine camera view based on the plane
+    let cameraView = 'front'; // default view (XY plane)
+    switch (planeInfo.plane) {
+      case 'yz':
+        cameraView = 'right';
+        break;
+      case 'xz':
+        cameraView = 'top';
+        break;
+      case 'custom':
+        cameraView = 'custom';
+        break;
+    }
+    
+    // Dispatch event to notify of sketch creation with camera view information
     const event = new CustomEvent('openshape:sketchCreated', {
-      detail: { sketchId, plane: planeInfo.plane }
+      detail: { 
+        sketchId, 
+        sketch, // Include the entire sketch object
+        plane: planeInfo.plane,
+        cameraView, 
+        offset: planeInfo.offset || 0
+      }
     });
     window.dispatchEvent(event);
+    
+    // Also dispatch the sketch mode changed event
+    const modeEvent = new CustomEvent('openshape:sketchModeChanged', {
+      detail: {
+        active: true,
+        sketch,
+        plane: planeInfo.plane
+      }
+    });
+    window.dispatchEvent(modeEvent);
     
     return sketch;
   }
@@ -140,16 +170,17 @@ class SketchManager {
     // Save current sketch state if needed
     const currentSketchId = this.activeSketch.id;
     
-    // Clear active sketch
+    // Clear active sketch and exit sketch mode
+    const previousSketch = this.activeSketch;
     this.activeSketch = null;
     this.isInSketchMode = false;
     
-    // Dispatch event to notify of sketch mode exit
+    // Dispatch event to notify that sketch mode has been exited
     const event = new CustomEvent('openshape:sketchModeChanged', {
-      detail: { 
-        active: false, 
-        sketch: null,
-        previousSketchId: currentSketchId
+      detail: {
+        active: false,
+        previousSketch, // Include the sketch that was active
+        previousPlane: previousSketch ? previousSketch.plane : null
       }
     });
     window.dispatchEvent(event);

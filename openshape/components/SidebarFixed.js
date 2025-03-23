@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { modelStore, notifyModelChanged } from '../lib/mcpTools';
 import sketchManager from '../lib/sketchManager';
 import { 
@@ -11,7 +11,10 @@ import {
   Layers,
   Search,
   Edit,
-  X
+  X,
+  Eye,
+  EyeOff,
+  Trash
 } from 'lucide-react';
 
 /**
@@ -37,6 +40,19 @@ const SidebarFixed = ({ isOpen, onClose }) => {
   const [expandedFeatures, setExpandedFeatures] = useState({});
   const [filterText, setFilterText] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(null);
+  
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState({
+    show: false,
+    x: 0,
+    y: 0,
+    sketchId: null
+  });
+  
+  // Track hidden sketches
+  const [hiddenSketches, setHiddenSketches] = useState({});
+  
+  const contextMenuRef = useRef(null);
 
   // Load model data
   useEffect(() => {
@@ -99,6 +115,23 @@ const SidebarFixed = ({ isOpen, onClose }) => {
     };
   }, []);
   
+  // Add click outside listener to close context menu
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target)) {
+        setContextMenu({ show: false, x: 0, y: 0, sketchId: null });
+      }
+    };
+    
+    if (contextMenu.show) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [contextMenu.show]);
+  
   // Toggle section expand/collapse
   const toggleSection = (section) => {
     setExpandedSections(prev => ({
@@ -126,19 +159,11 @@ const SidebarFixed = ({ isOpen, onClose }) => {
       notifyModelChanged(modelStore.getModel(id));
     }
     
-    // If it's a sketch, set it as active in sketch manager
+    // If it's a sketch, only select it but DON'T enter sketch mode
+    // This is important - we now only enter sketch mode through the context menu
     if (id.startsWith('sketch_')) {
-      const sketch = sketchManager.sketches[id];
-      if (sketch) {
-        sketchManager.activeSketch = sketch;
-        sketchManager.isInSketchMode = true;
-        
-        // Notify that sketch mode changed
-        const event = new CustomEvent('openshape:sketchModeChanged', {
-          detail: { active: true, sketch }
-        });
-        window.dispatchEvent(event);
-      }
+      // Just select the sketch without entering sketch mode
+      // The enterSketchMode function in the context menu will handle activating the sketch
     }
     
     // Handle part library selection
@@ -150,6 +175,98 @@ const SidebarFixed = ({ isOpen, onClose }) => {
       // Logic for selecting cylinder from library
     } else if (id === 'part_torus') {
       // Logic for selecting torus from library
+    }
+  };
+  
+  // Show context menu on right click
+  const handleSketchContextMenu = (event, sketchId) => {
+    event.preventDefault();
+    setContextMenu({
+      show: true,
+      x: event.clientX,
+      y: event.clientY,
+      sketchId
+    });
+  };
+  
+  // Context menu actions
+  const enterSketchMode = (sketchId) => {
+    const sketch = sketchManager.sketches[sketchId];
+    if (sketch) {
+      sketchManager.activeSketch = sketch;
+      sketchManager.isInSketchMode = true;
+      
+      // Notify that sketch mode changed
+      const event = new CustomEvent('openshape:sketchModeChanged', {
+        detail: { active: true, sketch }
+      });
+      window.dispatchEvent(event);
+      
+      // Close the context menu
+      setContextMenu({ show: false, x: 0, y: 0, sketchId: null });
+    }
+  };
+  
+  const toggleSketchVisibility = (sketchId) => {
+    const sketch = sketchManager.sketches[sketchId];
+    if (sketch) {
+      // Toggle visibility in our state
+      setHiddenSketches(prev => ({
+        ...prev,
+        [sketchId]: !prev[sketchId]
+      }));
+      
+      // Hide plane model if it exists
+      if (sketch.planeModelId) {
+        const isVisible = !hiddenSketches[sketchId];
+        modelStore.setModelVisibility(sketch.planeModelId, !isVisible);
+        notifyModelChanged({ id: sketch.planeModelId, isVisible: !isVisible });
+      }
+      
+      // Hide all entities in the sketch
+      sketch.entities.forEach(entity => {
+        if (entity.modelId) {
+          const isVisible = !hiddenSketches[sketchId];
+          modelStore.setModelVisibility(entity.modelId, !isVisible);
+          notifyModelChanged({ id: entity.modelId, isVisible: !isVisible });
+        }
+      });
+      
+      // Close the context menu
+      setContextMenu({ show: false, x: 0, y: 0, sketchId: null });
+    }
+  };
+  
+  const deleteSketch = (sketchId) => {
+    const sketch = sketchManager.sketches[sketchId];
+    if (sketch) {
+      // First, remove sketch plane visualization
+      if (sketch.planeModelId) {
+        modelStore.removeModel(sketch.planeModelId);
+        notifyModelChanged({ id: sketch.planeModelId, deleted: true });
+      }
+      
+      // Remove all entities in the sketch
+      sketch.entities.forEach(entity => {
+        if (entity.modelId) {
+          modelStore.removeModel(entity.modelId);
+          notifyModelChanged({ id: entity.modelId, deleted: true });
+        }
+      });
+      
+      // Remove sketch from sketchManager
+      delete sketchManager.sketches[sketchId];
+      
+      // Exit sketch mode if the deleted sketch was active
+      if (sketchManager.activeSketch && sketchManager.activeSketch.id === sketchId) {
+        sketchManager.exitSketchMode();
+      }
+      
+      // Update sketches state
+      setSketches(Object.values(sketchManager.sketches || {}));
+      
+      // Close the context menu
+      setContextMenu({ show: false, x: 0, y: 0, sketchId: null });
     }
   };
   
@@ -440,9 +557,12 @@ const SidebarFixed = ({ isOpen, onClose }) => {
                           selectedItemId === sketch.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'
                         }`}
                         onClick={() => {
+                          // Select the sketch but don't enter sketch mode
                           handleItemClick(sketch.id);
+                          // Toggle expansion of the sketch's features
                           toggleFeatureExpansion(sketch.id);
                         }}
+                        onContextMenu={(e) => handleSketchContextMenu(e, sketch.id)}
                       >
                         <div className="mr-1">
                           {expandedFeatures[sketch.id] ? 
@@ -450,8 +570,11 @@ const SidebarFixed = ({ isOpen, onClose }) => {
                             <ChevronRight size={14} className="text-gray-500" />
                           }
                         </div>
-                        <Edit size={16} className="text-blue-600 mr-2" />
-                        <span>{sketch.name}</span>
+                        <Edit size={16} className={`${hiddenSketches[sketch.id] ? 'text-gray-400' : 'text-blue-600'} mr-2`} />
+                        <span className={hiddenSketches[sketch.id] ? 'text-gray-400' : ''}>
+                          {sketch.name}
+                          <span className="ml-2 text-xs text-gray-500 italic">(Right-click for options)</span>
+                        </span>
                       </div>
                       
                       {/* Sketch entities and operations */}
@@ -584,6 +707,54 @@ const SidebarFixed = ({ isOpen, onClose }) => {
           </div>
         </div>
       </div>
+      
+      {/* Context Menu */}
+      {contextMenu.show && (
+        <div
+          ref={contextMenuRef}
+          className="fixed bg-white shadow-lg rounded-md border border-gray-200 py-1 z-50"
+          style={{
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+            minWidth: '180px'
+          }}
+        >
+          <div 
+            className="px-4 py-2 hover:bg-gray-100 flex items-center cursor-pointer"
+            onClick={() => enterSketchMode(contextMenu.sketchId)}
+          >
+            <Edit size={16} className="text-blue-600 mr-2" />
+            <span>Enter Sketch</span>
+          </div>
+          
+          <div 
+            className="px-4 py-2 hover:bg-gray-100 flex items-center cursor-pointer"
+            onClick={() => toggleSketchVisibility(contextMenu.sketchId)}
+          >
+            {hiddenSketches[contextMenu.sketchId] ? (
+              <>
+                <Eye size={16} className="text-green-600 mr-2" />
+                <span>Show Sketch</span>
+              </>
+            ) : (
+              <>
+                <EyeOff size={16} className="text-gray-600 mr-2" />
+                <span>Hide Sketch</span>
+              </>
+            )}
+          </div>
+          
+          <div className="border-t border-gray-200 my-1"></div>
+          
+          <div 
+            className="px-4 py-2 hover:bg-red-50 flex items-center cursor-pointer text-red-600"
+            onClick={() => deleteSketch(contextMenu.sketchId)}
+          >
+            <Trash size={16} className="mr-2" />
+            <span>Delete Sketch</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

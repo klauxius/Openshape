@@ -118,6 +118,7 @@ export default function CadInterface() {
   const [selectedPartType, setSelectedPartType] = useState(null);
   const [partParameters, setPartParameters] = useState({});
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const viewerRef = useRef(null);
 
   // Fake data for the UI mockup
   const featureItems = [
@@ -279,6 +280,44 @@ export default function CadInterface() {
       
       // Update UI to reflect sketch mode
       setIsInSketchMode(true)
+      
+      // Snap camera view to be normal to the selected plane
+      const viewer = document.getElementById('jscad-three-viewer');
+      if (viewer) {
+        // Access the viewer's scene and camera
+        const scene = viewer.scene;
+        const camera = viewer.camera;
+        const controls = viewer.controls;
+        
+        if (camera && controls) {
+          // Set camera position based on plane
+          switch(planeInfo.plane) {
+            case 'xy':
+              // Front view is normal to XY plane (looking from Z axis)
+              camera.position.set(0, 0, 15);
+              camera.lookAt(0, 0, 0);
+              break;
+            case 'yz':
+              // Right view is normal to YZ plane (looking from X axis)
+              camera.position.set(15, 0, 0);
+              camera.lookAt(0, 0, 0);
+              break;
+            case 'xz':
+              // Top view is normal to XZ plane (looking from Y axis)
+              camera.position.set(0, 15, 0);
+              camera.lookAt(0, 0, 0);
+              break;
+            default:
+              // For custom planes, we'd need more complex camera positioning
+              camera.position.set(0, 0, 15);
+              camera.lookAt(0, 0, 0);
+          }
+          
+          if (controls.update) {
+            controls.update();
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to create sketch:', error)
       alert(`Failed to create sketch: ${error.message}`)
@@ -725,6 +764,7 @@ export default function CadInterface() {
           {/* 3D Viewer */}
           <div className="relative flex-1 bg-gray-100">
             <JscadThreeViewer 
+              id="jscad-three-viewer"
               onModelChange={setActiveModel}
             />
 

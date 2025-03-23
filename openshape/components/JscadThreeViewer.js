@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import * as jscad from '@jscad/modeling';
@@ -165,7 +165,7 @@ function jscadToThreeGeometry(jscadGeometry) {
   return geometry;
 }
 
-function JscadThreeScene() {
+const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
   const mountRef = useRef(null);
   const controlsRef = useRef(null);
   const [modelType, setModelType] = useState('cube');
@@ -196,6 +196,21 @@ function JscadThreeScene() {
   // Store MCP models
   const [mcpModels, setMcpModels] = useState({});
   const meshesRef = useRef({});
+
+  // Add sketch mode state to track when rotation should be disabled
+  const [inSketchMode, setInSketchMode] = useState(false);
+  // Remember the active sketch plane for view orientation
+  const [activeSketchPlane, setActiveSketchPlane] = useState(null);
+  // Store camera positions for each sketch to restore them when switching
+  const sketchCameraPositionsRef = useRef({});
+
+  // Define standard camera positions for each plane type
+  const standardCameraPositions = {
+    xy: { position: [0, 0, 15], target: [0, 0, 0] },
+    yz: { position: [15, 0, 0], target: [0, 0, 0] },
+    xz: { position: [0, 15, 0], target: [0, 0, 0] },
+    custom: { position: [0, 0, 15], target: [0, 0, 0] }
+  };
 
   // Add a separate useEffect to handle MCP model change events
   useEffect(() => {
@@ -277,6 +292,218 @@ function JscadThreeScene() {
     };
   }, [mcpModels]);
 
+  // Add this useEffect to handle sketch mode change events
+  useEffect(() => {
+    const handleSketchModeChanged = (event) => {
+      const { active, sketch, plane } = event.detail;
+      setInSketchMode(active);
+      
+      // If controls aren't set up yet, just update the state
+      if (!controlsRef.current || !cameraRef.current) return;
+      
+      if (active) {
+        // Disable rotation when entering sketch mode
+        controlsRef.current.enableRotate = false;
+        
+        // Store the sketch plane for reference
+        const sketchPlane = plane || (sketch ? sketch.plane : 'xy');
+        setActiveSketchPlane(sketchPlane);
+        
+        // Determine if we have a stored camera position for this sketch
+        const sketchId = sketch ? sketch.id : null;
+        const hasStoredPosition = sketchId && sketchCameraPositionsRef.current[sketchId];
+        
+        if (hasStoredPosition) {
+          // Restore the previously saved camera position for this sketch
+          const savedPosition = sketchCameraPositionsRef.current[sketchId];
+          cameraRef.current.position.set(
+            savedPosition.position[0],
+            savedPosition.position[1],
+            savedPosition.position[2]
+          );
+          cameraRef.current.lookAt(
+            savedPosition.target[0],
+            savedPosition.target[1],
+            savedPosition.target[2]
+          );
+        } else {
+          // Set standard camera position based on the sketch plane
+          const standardPosition = standardCameraPositions[sketchPlane] || standardCameraPositions.xy;
+          
+          cameraRef.current.position.set(
+            standardPosition.position[0],
+            standardPosition.position[1],
+            standardPosition.position[2]
+          );
+          cameraRef.current.lookAt(
+            standardPosition.target[0],
+            standardPosition.target[1],
+            standardPosition.target[2]
+          );
+          
+          // Store this position for future reference if we have a sketch ID
+          if (sketchId) {
+            sketchCameraPositionsRef.current[sketchId] = {
+              position: [...standardPosition.position],
+              target: [...standardPosition.target]
+            };
+          }
+        }
+        
+        // Update controls to reflect camera changes
+        controlsRef.current.update();
+        
+        console.log('Camera positioned normal to sketch plane:', sketchPlane);
+      } else {
+        // Re-enable rotation when exiting sketch mode
+        controlsRef.current.enableRotate = true;
+        
+        // Save the current camera position for this sketch before exiting
+        if (sketch && sketch.id) {
+          sketchCameraPositionsRef.current[sketch.id] = {
+            position: [
+              cameraRef.current.position.x,
+              cameraRef.current.position.y,
+              cameraRef.current.position.z
+            ],
+            target: [0, 0, 0] // Always looking at origin
+          };
+        }
+        
+        console.log('Camera rotation re-enabled');
+      }
+    };
+    
+    window.addEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
+    
+    return () => {
+      window.removeEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
+    };
+  }, []);
+
+  // Handle the sketch creation event to orient camera correctly
+  useEffect(() => {
+    const handleSketchCreated = (event) => {
+      const { plane, sketchId, cameraView, sketch } = event.detail;
+      
+      // Update state tracking
+      setActiveSketchPlane(plane);
+      setInSketchMode(true);
+      
+      // If camera and controls are ready, set the view and disable rotation
+      if (cameraRef.current && controlsRef.current) {
+        // Get the standard position for this plane type
+        const standardPosition = standardCameraPositions[plane] || standardCameraPositions.xy;
+        
+        // Set camera position and orientation
+        cameraRef.current.position.set(
+          standardPosition.position[0],
+          standardPosition.position[1],
+          standardPosition.position[2]
+        );
+        cameraRef.current.lookAt(
+          standardPosition.target[0],
+          standardPosition.target[1],
+          standardPosition.target[2]
+        );
+        
+        // Store this position for future reference
+        if (sketchId) {
+          sketchCameraPositionsRef.current[sketchId] = {
+            position: [...standardPosition.position],
+            target: [...standardPosition.target]
+          };
+        }
+        
+        // Disable rotation controls
+        controlsRef.current.enableRotate = false;
+        controlsRef.current.update();
+        
+        console.log('Sketch created - Camera positioned normal to plane:', plane);
+      }
+    };
+    
+    window.addEventListener('openshape:sketchCreated', handleSketchCreated);
+    
+    return () => {
+      window.removeEventListener('openshape:sketchCreated', handleSketchCreated);
+    };
+  }, []);
+
+  // Add keyboard shortcut to reset camera view for active sketch
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Reset camera view with 'R' key when in sketch mode
+      if (inSketchMode && event.key.toLowerCase() === 'r') {
+        if (cameraRef.current && controlsRef.current && activeSketchPlane) {
+          const standardPosition = standardCameraPositions[activeSketchPlane] || standardCameraPositions.xy;
+          
+          cameraRef.current.position.set(
+            standardPosition.position[0],
+            standardPosition.position[1],
+            standardPosition.position[2]
+          );
+          cameraRef.current.lookAt(
+            standardPosition.target[0],
+            standardPosition.target[1],
+            standardPosition.target[2]
+          );
+          
+          controlsRef.current.update();
+          console.log('Camera view reset to normal position for sketch plane:', activeSketchPlane);
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [inSketchMode, activeSketchPlane]);
+
+  // Add listener for the reset sketch view event
+  useEffect(() => {
+    const handleResetSketchView = (event) => {
+      const { sketchId, plane } = event.detail;
+      
+      if (!cameraRef.current || !controlsRef.current) return;
+      
+      // Get the standard camera position for this plane
+      const sketchPlane = plane || activeSketchPlane || 'xy';
+      const standardPosition = standardCameraPositions[sketchPlane] || standardCameraPositions.xy;
+      
+      // Reset camera to standard position for this plane
+      cameraRef.current.position.set(
+        standardPosition.position[0],
+        standardPosition.position[1],
+        standardPosition.position[2]
+      );
+      cameraRef.current.lookAt(
+        standardPosition.target[0],
+        standardPosition.target[1],
+        standardPosition.target[2]
+      );
+      
+      // Update controls and store this position
+      controlsRef.current.update();
+      
+      // Update stored position if we have a sketch ID
+      if (sketchId) {
+        sketchCameraPositionsRef.current[sketchId] = {
+          position: [...standardPosition.position],
+          target: [...standardPosition.target]
+        };
+      }
+      
+      console.log('Camera view manually reset for sketch plane:', sketchPlane);
+    };
+    
+    window.addEventListener('openshape:resetSketchView', handleResetSketchView);
+    return () => {
+      window.removeEventListener('openshape:resetSketchView', handleResetSketchView);
+    };
+  }, [activeSketchPlane]);
+
   useEffect(() => {
     // Early return if the ref isn't set yet
     if (!mountRef.current) return;
@@ -321,14 +548,17 @@ function JscadThreeScene() {
         renderer.setSize(width, height);
         mountRef.current.appendChild(renderer.domElement);
         
-        // Create orbit controls
+        // Create orbit controls with initial settings based on sketch mode
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.25;
         
+        // Initialize rotation based on current sketch mode
+        controls.enableRotate = !inSketchMode;
+        
         // Configure mouse buttons for standard CAD interaction
         controls.mouseButtons = {
-          LEFT: THREE.MOUSE.ROTATE,      // Left mouse button: Rotate
+          LEFT: THREE.MOUSE.ROTATE,      // Left mouse button: Rotate (when not in sketch mode)
           MIDDLE: THREE.MOUSE.ROTATE,    // Middle mouse button: Rotate (industry standard)
           RIGHT: THREE.MOUSE.PAN         // Right mouse button: Pan
         };
@@ -555,7 +785,7 @@ function JscadThreeScene() {
         
         window.addEventListener('resize', handleResize);
         
-        // Handle keyboard events for measurement tool
+        // Handle keyboard events for measurement tool and resetting view
         const handleKeyDown = (event) => {
           if (event.key === 'Escape') {
             // Cancel current measurement
@@ -567,6 +797,24 @@ function JscadThreeScene() {
               // If user presses Escape twice, exit measurement mode entirely
               if (savedMeasurements.length === 0) {
                 setMeasurementMode(false);
+              }
+            }
+          }
+          
+          // Add key handler for resetting view to be normal to sketch plane
+          if (inSketchMode && event.key === 'r') {
+            // Reset view to be normal to active sketch plane
+            if (activeSketchPlane) {
+              switch(activeSketchPlane) {
+                case 'xy':
+                  setFrontView();
+                  break;
+                case 'yz':
+                  setRightView();
+                  break;
+                case 'xz':
+                  setTopView();
+                  break;
               }
             }
           }
@@ -596,13 +844,45 @@ function JscadThreeScene() {
     };
     
     importJscad();
-  }, [modelType, measurementMode, unitSystem, showPlanes]);
+  }, [modelType, measurementMode, unitSystem, showPlanes, inSketchMode, activeSketchPlane]);
 
   const handleModelChange = (event) => {
     setModelType(event.target.value);
   };
 
-  // Set standard view functions
+  // Expose methods to parent components
+  useImperativeHandle(ref, () => ({
+    setFrontView: () => {
+      if (cameraRef.current && controlsRef.current) {
+        cameraRef.current.position.set(0, 0, 15);
+        cameraRef.current.lookAt(0, 0, 0);
+        controlsRef.current.update();
+      }
+    },
+    setTopView: () => {
+      if (cameraRef.current && controlsRef.current) {
+        cameraRef.current.position.set(0, 15, 0);
+        cameraRef.current.lookAt(0, 0, 0);
+        controlsRef.current.update();
+      }
+    },
+    setRightView: () => {
+      if (cameraRef.current && controlsRef.current) {
+        cameraRef.current.position.set(15, 0, 0);
+        cameraRef.current.lookAt(0, 0, 0);
+        controlsRef.current.update();
+      }
+    },
+    setIsometricView: () => {
+      if (cameraRef.current && controlsRef.current) {
+        cameraRef.current.position.set(15, 15, 15);
+        cameraRef.current.lookAt(0, 0, 0);
+        controlsRef.current.update();
+      }
+    }
+  }));
+
+  // When defining these functions within the component, keep them for internal use
   const setFrontView = () => {
     if (cameraRef.current && controlsRef.current) {
       cameraRef.current.position.set(0, 0, 15);
@@ -768,11 +1048,22 @@ function JscadThreeScene() {
         position={{ top: '70px', right: '20px' }}
       />
 
-      {/* Navigation help */}
+      {/* Navigation help with updated text for sketch mode */}
       <div className="absolute bottom-16 left-4 text-xs text-gray-600 bg-white bg-opacity-70 p-2 rounded">
-        <div>Left Click - Rotate</div>
-        <div>Right Click - Pan</div>
-        <div>Scroll - Zoom</div>
+        {inSketchMode ? (
+          <>
+            <div>Sketch Mode - View locked to plane</div>
+            <div>Right Click - Pan</div>
+            <div>Scroll - Zoom</div>
+            <div>Press R - Reset view</div>
+          </>
+        ) : (
+          <>
+            <div>Left Click - Rotate</div>
+            <div>Right Click - Pan</div>
+            <div>Scroll - Zoom</div>
+          </>
+        )}
       </div>
 
       {/* Status bar with coordinates */}
@@ -843,18 +1134,6 @@ function JscadThreeScene() {
       )}
     </div>
   );
-}
+});
 
-// Export wrapped in error boundary
-export default function JscadThreeViewer() {
-  // Client-side check to ensure we're in the browser
-  if (typeof window === 'undefined') {
-    return <div>Loading...</div>;
-  }
-  
-  return (
-    <ErrorBoundary>
-      <JscadThreeScene />
-    </ErrorBoundary>
-  );
-} 
+export default JscadThreeViewer; 

@@ -7,7 +7,9 @@ import {
   Hexagon, 
   Type, 
   ArrowUp, 
-  X 
+  X,
+  CircleDot,
+  RotateCcw
 } from 'lucide-react';
 import sketchManager from '../lib/sketchManager';
 
@@ -34,46 +36,94 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
     
     window.addEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
     
+    // Set up tool-specific event handling
+    const handleCanvasClick = (event) => {
+      // Only handle clicks if we're in point or line creation mode
+      if (!['point', 'line'].includes(activeTool)) return;
+      
+      // Convert screen coordinates to model coordinates
+      const viewer = document.getElementById('jscad-three-viewer');
+      if (!viewer || !viewer.__jscadViewer) return;
+      
+      const viewerRect = viewer.getBoundingClientRect();
+      const x = ((event.clientX - viewerRect.left) / viewerRect.width) * 2 - 1;
+      const y = -((event.clientY - viewerRect.top) / viewerRect.height) * 2 + 1;
+      
+      try {
+        if (activeTool === 'point') {
+          // Add a point at the clicked position
+          sketchManager.addEntity('point', {
+            position: [x * 10, y * 10, 0], // Scale to model space
+            size: 0.2
+          });
+        } else if (activeTool === 'line') {
+          // Line tool would be implemented similarly
+        }
+      } catch (error) {
+        console.error(`Failed to add ${activeTool}:`, error);
+      }
+    };
+    
+    document.addEventListener('click', handleCanvasClick);
+    
     return () => {
       window.removeEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
+      document.removeEventListener('click', handleCanvasClick);
     };
-  }, []);
+  }, [activeTool]);
   
   if (!activeSketch) return null;
   
   const handleToolSelect = (tool) => {
     setActiveTool(tool);
-    // TODO: Implement tool-specific interactions based on selected tool
+    
+    // Reset any active operations
+    const viewer = document.getElementById('jscad-three-viewer');
+    if (viewer && viewer.__jscadViewer) {
+      // Clear any temporary entities or guides
+    }
+    
+    console.log(`Selected tool: ${tool}`);
   };
   
   const handleExtrudeClick = () => {
-    // Show a dialog to get the extrusion height
-    const height = window.prompt('Enter extrusion height:', '10');
+    if (!activeSketch) return;
     
-    if (height !== null) {
-      try {
-        const parsedHeight = parseFloat(height);
-        if (isNaN(parsedHeight) || parsedHeight <= 0) {
-          throw new Error('Invalid height');
-        }
-        
-        const modelId = sketchManager.extrudeActiveSketch(parsedHeight);
-        
-        if (onExtrude) {
-          onExtrude(modelId);
-        }
-      } catch (error) {
-        alert(`Failed to extrude sketch: ${error.message}`);
+    // Show extrude dialog or directly extrude
+    try {
+      // For now, extrude by a fixed amount
+      const extrudedModelId = sketchManager.extrudeActiveSketch(5); // 5mm extrusion
+      if (extrudedModelId && onExtrude) {
+        onExtrude(extrudedModelId);
       }
+      
+      // Exit sketch mode after extrusion
+      handleExitClick();
+    } catch (error) {
+      console.error('Failed to extrude sketch:', error);
     }
   };
   
   const handleExitClick = () => {
-    sketchManager.exitSketchMode();
+    if (sketchManager.isInSketchMode) {
+      sketchManager.exitSketchMode();
+    }
     
     if (onExit) {
       onExit();
     }
+  };
+  
+  // Add new function to reset camera view
+  const handleResetView = () => {
+    // Dispatch event to reset camera view
+    const event = new CustomEvent('openshape:resetSketchView', {
+      detail: { 
+        sketchId: activeSketch?.id,
+        plane: activeSketch?.plane || 'xy'
+      }
+    });
+    window.dispatchEvent(event);
   };
   
   return (
@@ -81,6 +131,7 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
       <div className="p-2 flex items-center">
         <div className="mr-4 font-medium text-blue-600">
           Sketch Mode: {activeSketch.name}
+          <span className="ml-2 text-xs text-gray-500">(Camera rotation locked)</span>
         </div>
         
         <div className="border-r border-gray-300 h-8 mx-2"></div>
@@ -92,6 +143,14 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
             title="Select"
           >
             <MousePointer size={20} />
+          </button>
+          
+          <button
+            className={`p-2 rounded ${activeTool === 'point' ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100'}`}
+            onClick={() => handleToolSelect('point')}
+            title="Point"
+          >
+            <CircleDot size={20} />
           </button>
           
           <button
@@ -138,20 +197,31 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
         <div className="border-r border-gray-300 h-8 mx-2"></div>
         
         <button
-          className="px-3 py-1 bg-green-600 text-white rounded flex items-center hover:bg-green-700"
+          className="p-2 rounded hover:bg-gray-100"
+          onClick={handleResetView}
+          title="Reset View"
+        >
+          <RotateCcw size={20} className="text-blue-600" />
+        </button>
+        
+        <div className="border-r border-gray-300 h-8 mx-2"></div>
+        
+        <button
+          className="p-2 rounded hover:bg-gray-100"
           onClick={handleExtrudeClick}
           title="Extrude Sketch"
         >
-          <ArrowUp size={16} className="mr-1" />
-          <span>Extrude</span>
+          <ArrowUp size={20} className="text-green-600" />
         </button>
         
+        <div className="border-r border-gray-300 h-8 mx-2"></div>
+        
         <button
-          className="p-2 text-gray-500 hover:text-red-600 ml-3"
+          className="p-2 rounded hover:bg-gray-100"
           onClick={handleExitClick}
           title="Exit Sketch Mode"
         >
-          <X size={20} />
+          <X size={20} className="text-red-600" />
         </button>
       </div>
     </div>

@@ -717,8 +717,8 @@ function JscadThreeScene() {
       <DomViewCube 
         cameraRef={cameraRef}
         controlsRef={controlsRef}
-        size={100}
-        position={{ top: '60px', right: '20px' }}
+        size={40}
+        position={{ top: '70px', right: '20px' }}
       />
 
       {/* Navigation help */}

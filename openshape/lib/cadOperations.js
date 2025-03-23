@@ -296,6 +296,106 @@ class CreateSketchOperation extends CADOperation {
   }
 }
 
+// Add new point operation class
+class AddSketchPointOperation extends CADOperation {
+  constructor(params = {}) {
+    super(params);
+    this.type = 'addSketchPoint';
+    this.description = 'Add point to sketch';
+  }
+  
+  execute() {
+    const { position = [0, 0], size = 0.2, name } = this.params;
+    
+    try {
+      if (!sketchManager.getActiveSketch()) {
+        throw new Error('No active sketch');
+      }
+      
+      const entity = sketchManager.addEntity('point', { position, size });
+      
+      // Add to history with undo/redo
+      operationHistory.addOperation({
+        type: this.type,
+        params: this.params,
+        entityId: entity.id,
+        undo: () => {
+          sketchManager.deleteEntity(entity.id);
+        },
+        redo: () => {
+          sketchManager.addEntity('point', { position, size });
+        }
+      });
+      
+      return { 
+        entityId: entity.id, 
+        success: true,
+        message: `Added point at position [${position.join(', ')}] to sketch`
+      };
+    } catch (error) {
+      console.error('Failed to add point to sketch:', error);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  toJscadCode() {
+    const { position = [0, 0], size = 0.2 } = this.params;
+    return `// Add point at position [${position[0]}, ${position[1]}] with size ${size} to sketch\n`;
+  }
+}
+
+// Add new connection operation class
+class ConnectPointsOperation extends CADOperation {
+  constructor(params = {}) {
+    super(params);
+    this.type = 'connectPoints';
+    this.description = 'Connect points with line';
+  }
+  
+  execute() {
+    const { pointId1, pointId2 } = this.params;
+    
+    if (!pointId1 || !pointId2) {
+      return { success: false, error: 'Two point IDs are required to create a connection' };
+    }
+    
+    try {
+      if (!sketchManager.getActiveSketch()) {
+        throw new Error('No active sketch');
+      }
+      
+      const connection = sketchManager.createConnection(pointId1, pointId2);
+      
+      // Add to history with undo/redo
+      operationHistory.addOperation({
+        type: this.type,
+        params: this.params,
+        entityId: connection.id,
+        undo: () => {
+          sketchManager.deleteEntity(connection.id);
+        },
+        redo: () => {
+          sketchManager.createConnection(pointId1, pointId2);
+        }
+      });
+      
+      return { 
+        entityId: connection.id, 
+        success: true,
+        message: `Connected points ${pointId1} and ${pointId2}`
+      };
+    } catch (error) {
+      console.error('Failed to connect points:', error);
+      return { success: false, error: error.message };
+    }
+  }
+  
+  toJscadCode() {
+    const { pointId1, pointId2 } = this.params;
+    return `// Connect points ${pointId1} and ${pointId2} with a line\n`;
+  }
+}
+
 class AddSketchCircleOperation extends CADOperation {
   constructor(params = {}) {
     super(params);
@@ -750,9 +850,15 @@ export const CADOperations = {
   
   // Sketch operations
   createSketch: (params) => new CreateSketchOperation(params).execute(),
+  addSketchPoint: (params) => new AddSketchPointOperation(params).execute(),
+  connectPoints: (params) => new ConnectPointsOperation(params).execute(),
   addSketchCircle: (params) => new AddSketchCircleOperation(params).execute(),
   addSketchRectangle: (params) => new AddSketchRectangleOperation(params).execute(),
   extrudeSketch: (params) => new ExtrudeSketchOperation(params).execute(),
+  
+  // Point management
+  getConnectionPoints: () => sketchManager.getConnectionPoints(),
+  findClosestConnectionPoint: (position, maxDistance) => sketchManager.findClosestConnectionPoint(position, maxDistance),
   
   // Boolean operations
   union: (params) => new UnionOperation(params).execute(),

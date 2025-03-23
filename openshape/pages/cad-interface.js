@@ -45,6 +45,7 @@ import SketchButton from '../components/SketchButton'
 import PlaneSelectionDialog from '../components/PlaneSelectionDialog'
 import sketchManager from '../lib/sketchManager'
 import { toggleTerminal } from '../components/CodeTerminal';
+import SidebarFixed from '../components/SidebarFixed'
 
 // Placeholder component for JscadThreeViewer
 const PlaceholderViewer = () => {
@@ -716,117 +717,9 @@ export default function CadInterface() {
 
         {/* Main content area */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Feature tree sidebar */}
+          {/* Use our Sidebar component instead of hardcoded feature tree */}
           {isSidebarOpen && (
-            <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
-              {/* Sidebar Header */}
-              <div className="p-3 border-b border-gray-200 font-medium text-gray-700">
-                Model Browser
-              </div>
-              
-              {/* Feature Tree */}
-              <div className="flex-1 overflow-y-auto">
-                <div className="p-2">
-                  <div className="mb-2">
-                    <div 
-                      className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
-                      onClick={toggleFeatures}
-                    >
-                      {expandedFeatures ? (
-                        <ChevronDown size={16} className="text-gray-500 mr-1" />
-                      ) : (
-                        <ChevronRight size={16} className="text-gray-500 mr-1" />
-                      )}
-                      <span className="font-medium text-sm">Features</span>
-                    </div>
-                    
-                    {expandedFeatures && (
-                      <div className="ml-5 mt-1 space-y-1">
-                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
-                          <span>Base Feature</span>
-                        </div>
-                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
-                          <span>Extrusion 1</span>
-                        </div>
-                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
-                          <span>Fillet 1</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div>
-                    <div 
-                      className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
-                      onClick={toggleParts}
-                    >
-                      {expandedParts ? (
-                        <ChevronDown size={16} className="text-gray-500 mr-1" />
-                      ) : (
-                        <ChevronRight size={16} className="text-gray-500 mr-1" />
-                      )}
-                      <span className="font-medium text-sm">Parts</span>
-                    </div>
-                    
-                    {expandedParts && (
-                      <div className="ml-5 mt-1 space-y-1">
-                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer">
-                          <span>Default</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Parts Library Section */}
-                  <div>
-                    <div 
-                      className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
-                      onClick={() => setExpandedDefaultGeometry(!expandedDefaultGeometry)}
-                    >
-                      {expandedDefaultGeometry ? (
-                        <ChevronDown size={16} className="text-gray-500 mr-1" />
-                      ) : (
-                        <ChevronRight size={16} className="text-gray-500 mr-1" />
-                      )}
-                      <span className="font-medium text-sm">Parts Library</span>
-                    </div>
-                    
-                    {expandedDefaultGeometry && (
-                      <div className="ml-5 mt-1 space-y-1">
-                        <div 
-                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
-                          onClick={() => handlePartClick('cube')}
-                        >
-                          <Box size={14} className="mr-1 text-gray-500" />
-                          <span>Cube</span>
-                        </div>
-                        <div 
-                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
-                          onClick={() => handlePartClick('sphere')}
-                        >
-                          <Circle size={14} className="mr-1 text-gray-500" />
-                          <span>Sphere</span>
-                        </div>
-                        <div 
-                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
-                          onClick={() => handlePartClick('cylinder')}
-                        >
-                          <div className="w-3.5 h-3.5 rounded-sm border border-gray-500 mr-1.5"></div>
-                          <span>Cylinder</span>
-                        </div>
-                        <div 
-                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
-                          onClick={() => handlePartClick('torus')}
-                        >
-                          <Hexagon size={14} className="mr-1 text-gray-500" />
-                          <span>Torus</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </aside>
+            <SidebarFixed isOpen={true} onClose={toggleSidebar} />
           )}
 
           {/* 3D Viewer */}

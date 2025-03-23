@@ -37,6 +37,9 @@ class SketchManager {
     
     // Selection management
     this.selectedEntities = new Set();
+    
+    // Connection points management
+    this.connectionPoints = new Map();
   }
 
   // [Existing createSketch method with enhancements]
@@ -53,7 +56,7 @@ class SketchManager {
       id: sketchId,
       name: `Sketch ${this.nextSketchId - 1}`,
       plane: planeInfo.plane,
-      offset: planeInfo.offset,
+      offset: planeInfo.offset || 0,
       entities: [],
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -66,80 +69,43 @@ class SketchManager {
     const planeSize = 10;
     let planeVisualization;
     
-    try {
-      // Create the plane using a more robust method
-      // Use a simple rectangle primitive instead of a polygon
-      // This ensures we always have a valid planar surface
-      switch (planeInfo.plane) {
-        case 'yz': {
-          // YZ plane (rectangle) at specified X
-          // Create rectangle in YZ plane
-          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
-          // Rotate to align with YZ plane
-          const rotated = jscad.transforms.rotateY(Math.PI / 2, rect);
-          // Then translate to desired X position
-          planeVisualization = jscad.transforms.translate([planeInfo.offset || 0, 0, 0], rotated);
-          break;
-        }
-        case 'xz': {
-          // XZ plane (rectangle) at specified Y
-          // Create rectangle in XZ plane
-          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
-          // Rotate to align with XZ plane
-          const rotated = jscad.transforms.rotateX(Math.PI / 2, rect);
-          // Then translate to desired Y position
-          planeVisualization = jscad.transforms.translate([0, planeInfo.offset || 0, 0], rotated);
-          break;
-        }
-        case 'custom': {
-          // For now, handle custom plane as XY at specified Z (can be enhanced later)
-          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
-          planeVisualization = jscad.transforms.translate([0, 0, planeInfo.offset || 0], rect);
-          break;
-        }
-        case 'xy':
-        default: {
-          // XY plane (rectangle) at specified Z
-          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
-          planeVisualization = jscad.transforms.translate([0, 0, planeInfo.offset || 0], rect);
-          break;
-        }
+    // Use cuboid directly instead of trying to extrude a 2D rectangle
+    // This avoids the "slices must have 3 or more edges" error
+    switch (planeInfo.plane) {
+      case 'yz': {
+        // YZ plane at specified X
+        planeVisualization = jscad.primitives.cuboid({ 
+          size: [0.01, planeSize * 2, planeSize * 2] 
+        });
+        planeVisualization = jscad.transforms.translate(
+          [sketch.offset, 0, 0], 
+          planeVisualization
+        );
+        break;
       }
-      
-      // Convert 2D rectangle to 3D by giving it a small thickness
-      planeVisualization = jscad.extrusions.extrudeLinear(
-        { height: 0.01, twistAngle: 0 },
-        planeVisualization
-      );
-      
-    } catch (error) {
-      console.error('Error creating sketch plane visualization:', error);
-      // As a fallback, use a simple cube with very small height to represent the plane
-      // This ensures we always have a valid geometry even if other methods fail
-      planeVisualization = jscad.primitives.cuboid({ 
-        size: [planeSize * 2, planeSize * 2, 0.01] 
-      });
-      
-      // Position the fallback plane correctly
-      switch (planeInfo.plane) {
-        case 'yz':
-          planeVisualization = jscad.transforms.translate(
-            [planeInfo.offset || 0, 0, 0], 
-            jscad.transforms.rotateY(Math.PI / 2, planeVisualization)
-          );
-          break;
-        case 'xz':
-          planeVisualization = jscad.transforms.translate(
-            [0, planeInfo.offset || 0, 0], 
-            jscad.transforms.rotateX(Math.PI / 2, planeVisualization)
-          );
-          break;
-        case 'xy':
-        default:
-          planeVisualization = jscad.transforms.translate(
-            [0, 0, planeInfo.offset || 0], 
-            planeVisualization
-          );
+      case 'xz': {
+        // XZ plane at specified Y
+        planeVisualization = jscad.primitives.cuboid({ 
+          size: [planeSize * 2, 0.01, planeSize * 2] 
+        });
+        planeVisualization = jscad.transforms.translate(
+          [0, sketch.offset, 0], 
+          planeVisualization
+        );
+        break;
+      }
+      case 'custom':
+      case 'xy':
+      default: {
+        // XY plane at specified Z
+        planeVisualization = jscad.primitives.cuboid({ 
+          size: [planeSize * 2, planeSize * 2, 0.01] 
+        });
+        planeVisualization = jscad.transforms.translate(
+          [0, 0, sketch.offset], 
+          planeVisualization
+        );
+        break;
       }
     }
     
@@ -163,6 +129,32 @@ class SketchManager {
     window.dispatchEvent(event);
     
     return sketch;
+  }
+
+  // Exit sketch mode
+  exitSketchMode() {
+    if (!this.isInSketchMode || !this.activeSketch) {
+      return false;
+    }
+    
+    // Save current sketch state if needed
+    const currentSketchId = this.activeSketch.id;
+    
+    // Clear active sketch
+    this.activeSketch = null;
+    this.isInSketchMode = false;
+    
+    // Dispatch event to notify of sketch mode exit
+    const event = new CustomEvent('openshape:sketchModeChanged', {
+      detail: { 
+        active: false, 
+        sketch: null,
+        previousSketchId: currentSketchId
+      }
+    });
+    window.dispatchEvent(event);
+    
+    return true;
   }
 
   // [Enhanced entity management with constraints and history]
@@ -190,6 +182,9 @@ class SketchManager {
     // Generate geometry
     let geometry;
     switch (type) {
+      case 'point':
+        geometry = this.createPointGeometry(entity.params);
+        break;
       case 'line':
         geometry = this.createLineGeometry(entity.params);
         break;
@@ -207,6 +202,15 @@ class SketchManager {
       const modelId = modelStore.addModel(geometry, `${type}_${entityId}`);
       entity.modelId = modelId;
       notifyModelChanged({ id: modelId, geometry, isVisible: true });
+      
+      // If this is a point, add it to the connection points map
+      if (type === 'point') {
+        this.connectionPoints.set(entityId, {
+          id: entityId,
+          position: entity.params.position,
+          connectedEntities: []
+        });
+      }
     }
 
     this.activeSketch.entities.push(entity);
@@ -238,6 +242,34 @@ class SketchManager {
     // Regenerate geometry
     let geometry;
     switch (entity.type) {
+      case 'point':
+        geometry = this.createPointGeometry(entity.params);
+        
+        // Update the connection point in the map
+        if (this.connectionPoints.has(entityId)) {
+          const connectionPoint = this.connectionPoints.get(entityId);
+          connectionPoint.position = entity.params.position;
+          this.connectionPoints.set(entityId, connectionPoint);
+          
+          // Update any connected entities that reference this point
+          connectionPoint.connectedEntities.forEach(connectedId => {
+            const connectedEntity = sketch.entities.find(e => e.id === connectedId);
+            if (connectedEntity && connectedEntity.type === 'line') {
+              if (connectedEntity.params.startPointId === entityId) {
+                connectedEntity.params.startPoint = entity.params.position;
+              } else if (connectedEntity.params.endPointId === entityId) {
+                connectedEntity.params.endPoint = entity.params.position;
+              }
+              
+              // Update the line geometry
+              const lineGeometry = this.createLineGeometry(connectedEntity.params);
+              const transformedLineGeometry = this.transformToSketchPlane(lineGeometry);
+              modelStore.updateModel(connectedEntity.modelId, transformedLineGeometry);
+              notifyModelChanged({ id: connectedEntity.modelId, geometry: transformedLineGeometry });
+            }
+          });
+        }
+        break;
       case 'line':
         geometry = this.createLineGeometry(entity.params);
         break;
@@ -275,6 +307,55 @@ class SketchManager {
     const [deleted] = sketch.entities.splice(index, 1);
     modelStore.removeModel(deleted.modelId);
     notifyModelChanged({ id: deleted.modelId, removed: true });
+    
+    // If this is a point, remove it from connection points and update any connected entities
+    if (deleted.type === 'point' && this.connectionPoints.has(entityId)) {
+      const connectionPoint = this.connectionPoints.get(entityId);
+      
+      // Remove references to this point from connected entities
+      connectionPoint.connectedEntities.forEach(connectedId => {
+        const connectedEntity = sketch.entities.find(e => e.id === connectedId);
+        if (connectedEntity && connectedEntity.type === 'line') {
+          // If the line was connected to this point, delete the line too
+          this.deleteEntity(connectedId);
+        }
+      });
+      
+      // Remove the point from the connection points map
+      this.connectionPoints.delete(entityId);
+    }
+  }
+  
+  // Create a connection between two points
+  createConnection(pointId1, pointId2) {
+    if (!this.activeSketch) throw new Error('No active sketch');
+    
+    // Verify both points exist
+    if (!this.connectionPoints.has(pointId1) || !this.connectionPoints.has(pointId2)) {
+      throw new Error('One or both points do not exist');
+    }
+    
+    const point1 = this.connectionPoints.get(pointId1);
+    const point2 = this.connectionPoints.get(pointId2);
+    
+    // Create a line entity connecting the two points
+    const lineParams = {
+      startPoint: point1.position,
+      endPoint: point2.position,
+      startPointId: pointId1,
+      endPointId: pointId2
+    };
+    
+    const lineEntity = this.addEntity('line', lineParams);
+    
+    // Update the connected entities for both points
+    point1.connectedEntities.push(lineEntity.id);
+    point2.connectedEntities.push(lineEntity.id);
+    
+    this.connectionPoints.set(pointId1, point1);
+    this.connectionPoints.set(pointId2, point2);
+    
+    return lineEntity;
   }
 
   // [Undo/Redo implementation]
@@ -331,6 +412,11 @@ class SketchManager {
     ];
 
     switch (type) {
+      case 'point':
+        return {
+          ...params,
+          position: snap(params.position)
+        };
       case 'line':
         return {
           ...params,
@@ -429,6 +515,15 @@ class SketchManager {
     const sanitized = {...params};
     
     switch (type) {
+      case 'point':
+        if (!Array.isArray(sanitized.position) || sanitized.position.length < 2) {
+          sanitized.position = [0, 0];
+        }
+        if (typeof sanitized.size !== 'number' || sanitized.size <= 0) {
+          sanitized.size = 0.2; // Default point visualization size
+        }
+        break;
+        
       case 'line':
         if (!Array.isArray(sanitized.startPoint) || sanitized.startPoint.length < 2) {
           sanitized.startPoint = [0, 0];
@@ -468,6 +563,33 @@ class SketchManager {
   // Transform 2D geometry to the active sketch plane
   transformToSketchPlane(geometry) {
     if (!this.activeSketch) throw new Error('No active sketch');
+    
+    // Special handling for point geometry
+    if (geometry.type === 'point') {
+      const position = geometry.position;
+      const offset = this.activeSketch.offset || 0;
+      let position3D;
+      
+      switch (this.activeSketch.plane) {
+        case 'yz':
+          position3D = [offset, position[0], position[1]];
+          break;
+        case 'xz':
+          position3D = [position[0], offset, position[1]];
+          break;
+        case 'xy':
+        default:
+          position3D = [position[0], position[1], offset];
+          break;
+      }
+      
+      // Create a small sphere to represent the point
+      return jscad.primitives.sphere({ 
+        center: position3D, 
+        radius: geometry.size || 0.2,
+        segments: 8 // Lower segment count for better performance
+      });
+    }
     
     // Check if we have at least 3 points to create a proper polygon
     if (!geometry.points || geometry.points.length < 3) {
@@ -523,6 +645,18 @@ class SketchManager {
     }
   }
   
+  // Create geometry for a point
+  createPointGeometry(params) {
+    const { position, size = 0.2 } = params;
+    
+    // Return a specialized point geometry that will be handled in transformToSketchPlane
+    return {
+      type: 'point',
+      position,
+      size
+    };
+  }
+  
   // Create geometry for a line
   createLineGeometry(params) {
     const { startPoint, endPoint } = params;
@@ -573,6 +707,30 @@ class SketchManager {
   // Get the active sketch
   getActiveSketch() {
     return this.activeSketch;
+  }
+  
+  // Get all available connection points
+  getConnectionPoints() {
+    return Array.from(this.connectionPoints.values());
+  }
+  
+  // Find the closest connection point to a given position
+  findClosestConnectionPoint(position, maxDistance = 0.5) {
+    let closest = null;
+    let minDistance = maxDistance;
+    
+    for (const [id, point] of this.connectionPoints.entries()) {
+      const dx = point.position[0] - position[0];
+      const dy = point.position[1] - position[1];
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closest = { id, point, distance };
+      }
+    }
+    
+    return closest;
   }
 }
 

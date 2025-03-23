@@ -4,25 +4,25 @@ import sketchManager from '../lib/sketchManager';
 import { 
   ChevronDown, 
   ChevronRight, 
-  Box as BoxIcon, 
+  Box, 
   Square, 
   Circle, 
-  CornerUpRight, 
-  Layers, 
-  Edit,
+  ArrowUp,
+  Layers,
   Search,
-  Pencil,
-  ArrowUp
+  Edit,
+  X
 } from 'lucide-react';
 
 /**
- * Sidebar component for the OpenShape CAD application with feature tree
+ * Fixed Sidebar component for the OpenShape CAD application with feature tree
+ * Avoids using icons that might not be available in all lucide-react versions
  * 
  * @param {Object} props - Component props
  * @param {boolean} props.isOpen - Whether the sidebar is open
  * @param {Function} props.onClose - Function to call when the sidebar is closed
  */
-const Sidebar = ({ isOpen, onClose }) => {
+const SidebarFixed = ({ isOpen, onClose }) => {
   const [models, setModels] = useState([]);
   const [activeModelId, setActiveModelId] = useState(null);
   const [sketches, setSketches] = useState([]);
@@ -159,9 +159,9 @@ const Sidebar = ({ isOpen, onClose }) => {
     
     // Based on naming conventions and types
     if (name.includes('cube')) {
-      return <BoxIcon size={16} className="text-blue-500" />;
+      return <Box size={16} className="text-blue-500" />;
     } else if (name.includes('cylinder')) {
-      return <CornerUpRight size={16} className="text-blue-500" />;
+      return <ArrowUp size={16} className="text-blue-500" />;
     } else if (name.includes('sphere')) {
       return <Circle size={16} className="text-blue-500" />;
     } else if (name.includes('torus')) {
@@ -171,13 +171,13 @@ const Sidebar = ({ isOpen, onClose }) => {
     } else if (name.includes('union')) {
       return <Layers size={16} className="text-purple-500" />;
     } else if (name.includes('subtract')) {
-      return <Edit size={16} className="text-red-500" />;
+      return <X size={16} className="text-red-500" />;
     } else if (name.includes('sketch') && !name.includes('plane')) {
-      return <Pencil size={16} className="text-blue-600" />;
+      return <Edit size={16} className="text-blue-600" />;
     } else if (name.includes('plane')) {
       return <Square size={16} className="text-blue-400" />;
     } else if (name.includes('fillet')) {
-      return <BoxIcon size={16} className="text-orange-500" />;
+      return <Box size={16} className="text-orange-500" />;
     } else {
       return <Layers size={16} className="text-gray-500" />;
     }
@@ -234,7 +234,7 @@ const Sidebar = ({ isOpen, onClose }) => {
   if (!isOpen) return null;
   
   return (
-    <div className="fixed inset-y-0 left-0 z-40 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out">
+    <div className="w-64 bg-white shadow-lg flex-shrink-0 flex flex-col h-full">
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-blue-600">Model Browser</h2>
@@ -242,9 +242,7 @@ const Sidebar = ({ isOpen, onClose }) => {
             className="text-gray-500 hover:text-gray-800"
             onClick={onClose}
           >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X size={16} />
           </button>
         </div>
         
@@ -378,7 +376,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                   }`}
                   onClick={() => handleItemClick('part_cube')}
                 >
-                  <BoxIcon size={16} className="text-blue-500 mr-2" />
+                  <Box size={16} className="text-blue-500 mr-2" />
                   <span>Cube</span>
                 </div>
                 <div 
@@ -396,7 +394,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                   }`}
                   onClick={() => handleItemClick('part_cylinder')}
                 >
-                  <CornerUpRight size={16} className="text-blue-500 mr-2" />
+                  <ArrowUp size={16} className="text-blue-500 mr-2" />
                   <span>Cylinder</span>
                 </div>
                 <div 
@@ -452,7 +450,7 @@ const Sidebar = ({ isOpen, onClose }) => {
                             <ChevronRight size={14} className="text-gray-500" />
                           }
                         </div>
-                        <Pencil size={16} className="text-blue-600 mr-2" />
+                        <Edit size={16} className="text-blue-600 mr-2" />
                         <span>{sketch.name}</span>
                       </div>
                       
@@ -590,4 +588,4 @@ const Sidebar = ({ isOpen, onClose }) => {
   );
 };
 
-export default Sidebar; 
+export default SidebarFixed; 

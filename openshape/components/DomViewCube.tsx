@@ -83,7 +83,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
         // Back view (+Z)
         setCameraRotation({ x: 0, y: 180, z: 0 });
         return;
-      } else {
+    } else {
         // Front view (-Z)
         setCameraRotation({ x: 0, y: 0, z: 0 });
         return;
@@ -151,7 +151,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     // Use a lower frequency for updates to prevent performance issues
     let lastUpdateTime = 0
     const updateInterval = 100 // ms between updates
-    
+
     // Track camera orientation and update the cube accordingly
     const animateUpdates = () => {
       if (!camera) return
@@ -197,7 +197,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     
     // Reset control target to origin
     if (controls.target) {
-      controls.target.set(0, 0, 0)
+    controls.target.set(0, 0, 0)
     }
 
     // Set standard view distance
@@ -215,7 +215,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
         break
       case "right": // Looking along positive X
         camera.position.set(distance, 0, 0)
-        camera.up.set(0, 1, 0) 
+        camera.up.set(0, 1, 0)
         break
       case "left": // Looking along negative X
         camera.position.set(-distance, 0, 0)
@@ -235,7 +235,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
 
     // Always make camera look at origin
     camera.lookAt(0, 0, 0)
-    
+
     // Force camera matrix updates
     camera.updateMatrix()
     camera.updateMatrixWorld(true)
@@ -244,15 +244,15 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     // Ensure controls are updated
     if (typeof controls.update === 'function') {
       // Temporarily disable damping for immediate response
-      const originalDamping = controls.enableDamping
-      controls.enableDamping = false
-      
+    const originalDamping = controls.enableDamping
+    controls.enableDamping = false
+
       // Force multiple updates to ensure changes take effect
-      controls.update()
-      controls.update() // Second update to be sure
-      
+    controls.update()
+    controls.update() // Second update to be sure
+
       // Restore original damping setting
-      controls.enableDamping = originalDamping
+    controls.enableDamping = originalDamping
     }
 
     // Calculate the exact rotation values for the view cube based on view
@@ -310,6 +310,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     height: "100%",
     position: "relative",
     transition: "transform 0.02s linear",
+    cursor: "pointer",
     pointerEvents: "auto", // Re-enable mouse events for the cube
   }
 

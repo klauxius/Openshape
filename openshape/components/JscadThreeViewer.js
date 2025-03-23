@@ -20,6 +20,63 @@ const { subtract, union } = booleans;
 const { extrudeLinear } = jscad.extrusions;
 const { colorize } = jscad.colors;
 
+// Create a sprite material for the origin point indicator
+const createOriginIndicatorSprite = (radius = 5, color = 0x000000) => {
+  // Create a canvas for drawing the origin indicator
+  const canvas = document.createElement('canvas');
+  canvas.width = 64; // Smaller canvas size
+  canvas.height = 64;
+  const context = canvas.getContext('2d');
+  
+  // Clear canvas with transparent background
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2;
+  
+  // Draw outer circle (dark)
+  const outerRadius = canvas.width / 3;
+  context.beginPath();
+  context.arc(centerX, centerY, outerRadius, 0, 2 * Math.PI, false);
+  context.fillStyle = 'rgba(0, 0, 0, 0.9)'; // Dark black with high opacity
+  context.fill();
+  
+  // Draw inner circle (white)
+  const innerRadius = outerRadius / 3;
+  context.beginPath();
+  context.arc(centerX, centerY, innerRadius, 0, 2 * Math.PI, false);
+  context.fillStyle = 'rgba(255, 255, 255, 0.9)'; // White center
+  context.fill();
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  
+  // Create sprite material
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,  // Important - ensures it's always visible through objects
+    depthWrite: false, // Don't write to depth buffer
+    sizeAttenuation: false // Important - makes size independent of distance
+  });
+  
+  return material;
+};
+
+// Create a simple origin indicator
+const createOriginIndicator = () => {
+  const originGroup = new THREE.Group();
+  originGroup.name = "originIndicator";
+  
+  // Create single origin point (dark with white center)
+  const centerSprite = new THREE.Sprite(createOriginIndicatorSprite());
+  centerSprite.scale.set(0.03, 0.03, 1); // Make it smaller overall
+  centerSprite.renderOrder = 1001; // Ensure it renders on top of everything
+  originGroup.add(centerSprite);
+  
+  return originGroup;
+};
+
 // Error boundary component
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -307,6 +364,10 @@ function JscadThreeScene() {
         const axesHelper = new THREE.AxesHelper(10);
         scene.add(axesHelper);
         
+        // Add constant-size origin indicator
+        const originIndicator = createOriginIndicator();
+        scene.add(originIndicator);
+        
         // Create reference planes
         referencePlanesRef.current = ReferencePlanes({
           scene,
@@ -420,6 +481,22 @@ function JscadThreeScene() {
         const animate = () => {
           const animationFrameId = requestAnimationFrame(animate);
           controls.update();
+          
+          // Update origin indicator to maintain constant screen size
+          if (originIndicator) {
+            // Calculate the proper scale to maintain constant screen size
+            // The approach is to scale based on camera distance
+            const cameraDistance = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
+            
+            // Scale factor calculation - adjust multiplier for desired size
+            // This makes the indicator slightly larger when camera is further away
+            // Reduced scale factor for smaller appearance
+            const scaleFactor = Math.max(0.02, Math.min(0.06, cameraDistance * 0.002));
+            
+            // Update the sprite scale - simpler now that we have just one sprite
+            originIndicator.children[0].scale.set(scaleFactor, scaleFactor, 1);
+          }
+          
           renderer.render(scene, camera);
           
           // Cleanup
@@ -436,6 +513,17 @@ function JscadThreeScene() {
                 scene.remove(mesh);
               }
             });
+            
+            // Clean up the origin indicator
+            if (originIndicator) {
+              originIndicator.children.forEach(sprite => {
+                if (sprite.material && sprite.material.map) {
+                  sprite.material.map.dispose();
+                }
+                if (sprite.material) sprite.material.dispose();
+              });
+              scene.remove(originIndicator);
+            }
             
             if (renderer) {
               if (mountRef.current) {

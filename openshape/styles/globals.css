@@ -12,6 +12,7 @@ body,
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
   color: #333; /* Default dark text color for everything */
+  cursor: default; /* Set default cursor to arrow */
 }
 
 :root {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   MousePointer, 
-  Line, 
+  Minus as LineIcon, 
   Circle, 
   Square, 
   Hexagon, 
@@ -99,7 +99,7 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
             onClick={() => handleToolSelect('line')}
             title="Line"
           >
-            <Line size={20} />
+            <LineIcon size={20} />
           </button>
           
           <button

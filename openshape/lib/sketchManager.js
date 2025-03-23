@@ -1,7 +1,10 @@
-// Sketch Manager for OpenShape
-// Handles creation and management of 2D sketches
+// Enhanced Sketch Manager for OpenShape
+// Incorporates modern CAD features and improvements
 
 import * as jscad from '@jscad/modeling';
+// Destructure specific JSCAD operations we'll need
+const { colorize } = jscad.colors;
+
 import { modelStore, notifyModelChanged } from './mcpTools';
 
 class SketchManager {
@@ -10,19 +13,42 @@ class SketchManager {
     this.sketches = {};
     this.nextSketchId = 1;
     this.isInSketchMode = false;
+    
+    // History management
+    this.history = [];
+    this.currentHistoryIndex = -1;
+    
+    // Grid configuration
+    this.grid = {
+      enabled: true,
+      spacing: 1,
+      snap: true
+    };
+    
+    // Layer system
+    this.layers = {
+      default: { 
+        id: 'default',
+        visible: true,
+        name: 'Default',
+        color: [0.8, 0.8, 0.8]
+      }
+    };
+    
+    // Selection management
+    this.selectedEntities = new Set();
   }
 
-  /**
-   * Create a new sketch on the specified plane
-   * @param {Object} planeInfo - Information about the sketch plane
-   * @param {string} planeInfo.plane - Plane identifier (xy, yz, xz, or custom)
-   * @param {number} planeInfo.offset - Offset from origin for custom planes
-   * @returns {Object} The created sketch
-   */
-  createSketch(planeInfo) {
+  // [Existing createSketch method with enhancements]
+  createSketch(planeInfo, layer = 'default') {
+    if (!['xy', 'yz', 'xz', 'custom'].includes(planeInfo.plane)) {
+      throw new Error('Invalid plane specified');
+    }
+    if (planeInfo.plane === 'custom' && typeof planeInfo.offset !== 'number') {
+      throw new Error('Custom plane requires numeric offset');
+    }
+
     const sketchId = `sketch_${this.nextSketchId++}`;
-    
-    // Create a sketch object to track sketch state
     const sketch = {
       id: sketchId,
       name: `Sketch ${this.nextSketchId - 1}`,
@@ -30,431 +56,505 @@ class SketchManager {
       offset: planeInfo.offset,
       entities: [],
       createdAt: new Date(),
-      isActive: true
+      updatedAt: new Date(),
+      isActive: true,
+      layer: layer,
+      constraints: {}
     };
-    
-    // Create a visual representation of the sketch plane
-    const planeSize = 50; // Size of the sketch plane visual
-    const halfSize = planeSize / 2;
-    
-    // Generate different geometries based on plane
+
+    // Create a visualization of the sketch plane
     let planePolygon;
+    const planeSize = 10;
     
-    // Define planes for each standard orientation
     switch (planeInfo.plane) {
       case 'yz':
-        // YZ plane (looking towards positive X)
+        // YZ plane at specified X
         planePolygon = {
           points: [
-            [0, -halfSize, -halfSize],  // bottom-left
-            [0, halfSize, -halfSize],   // top-left
-            [0, halfSize, halfSize],    // top-right
-            [0, -halfSize, halfSize]    // bottom-right
+            [planeInfo.offset || 0, -planeSize, -planeSize],
+            [planeInfo.offset || 0, planeSize, -planeSize],
+            [planeInfo.offset || 0, planeSize, planeSize],
+            [planeInfo.offset || 0, -planeSize, planeSize]
           ]
         };
         break;
       case 'xz':
-        // XZ plane (looking towards positive Y)
+        // XZ plane at specified Y
         planePolygon = {
           points: [
-            [-halfSize, 0, -halfSize],  // bottom-left
-            [halfSize, 0, -halfSize],   // bottom-right
-            [halfSize, 0, halfSize],    // top-right
-            [-halfSize, 0, halfSize]    // top-left
+            [-planeSize, planeInfo.offset || 0, -planeSize],
+            [planeSize, planeInfo.offset || 0, -planeSize],
+            [planeSize, planeInfo.offset || 0, planeSize],
+            [-planeSize, planeInfo.offset || 0, planeSize]
           ]
         };
         break;
       case 'custom':
-        // For custom planes, we'll use XY plane with an offset along Z
+        // Custom plane - placeholder for more advanced implementation
         planePolygon = {
           points: [
-            [-halfSize, -halfSize, planeInfo.offset],
-            [halfSize, -halfSize, planeInfo.offset],
-            [halfSize, halfSize, planeInfo.offset],
-            [-halfSize, halfSize, planeInfo.offset]
+            [-planeSize, -planeSize, planeInfo.offset || 0],
+            [planeSize, -planeSize, planeInfo.offset || 0],
+            [planeSize, planeSize, planeInfo.offset || 0],
+            [-planeSize, planeSize, planeInfo.offset || 0]
           ]
         };
         break;
       case 'xy':
       default:
-        // XY plane (looking towards positive Z)
+        // XY plane at specified Z
         planePolygon = {
           points: [
-            [-halfSize, -halfSize, 0],
-            [halfSize, -halfSize, 0],
-            [halfSize, halfSize, 0],
-            [-halfSize, halfSize, 0]
+            [-planeSize, -planeSize, planeInfo.offset || 0],
+            [planeSize, -planeSize, planeInfo.offset || 0],
+            [planeSize, planeSize, planeInfo.offset || 0],
+            [-planeSize, planeSize, planeInfo.offset || 0]
           ]
         };
-        break;
     }
     
-    // First create a proper JSCAD polygon from our points
+    // Create the plane geometry as a polygon for proper extrusion
     const planeGeometry = jscad.primitives.polygon(planePolygon);
     
-    // Create a thin extrusion to visualize the sketch plane
-    const planeVisualization = jscad.extrusions.extrudeLinear({ 
-      height: 0.1,
-      twistAngle: 0,
-      twistSteps: 1
-    }, planeGeometry);
+    // Create a thin extrusion to visualize the plane
+    const planeVisualization = jscad.extrusions.extrudeLinear(
+      { height: 0.05, twistAngle: 0 },
+      planeGeometry
+    );
     
-    // Add to model store as a visible plane
-    const planeModelId = modelStore.addModel(planeVisualization, `${sketch.name} Plane`);
+    // Add the plane visualization to the model store
+    const planeModelId = modelStore.addModel(
+      colorize([0.9, 0.9, 1, 0.2], planeVisualization),
+      `plane_${sketchId}`
+    );
+    
+    // Store the plane model ID in the sketch
     sketch.planeModelId = planeModelId;
     
-    // Store the sketch
     this.sketches[sketchId] = sketch;
-    
-    // Set as active sketch
     this.activeSketch = sketch;
     this.isInSketchMode = true;
     
-    // Notify the 3D viewer about the new sketch plane
-    notifyModelChanged({
-      id: planeModelId,
-      geometry: planeVisualization,
-      name: `${sketch.name} Plane`,
-      isVisible: true,
-      isSketchPlane: true
+    // Dispatch event to notify of sketch creation
+    const event = new CustomEvent('openshape:sketchCreated', {
+      detail: { sketchId, plane: planeInfo.plane }
     });
-    
-    // Emit an event to notify the application that we're in sketch mode
-    if (typeof window !== 'undefined') {
-      const event = new CustomEvent('openshape:sketchModeChanged', { 
-        detail: { 
-          active: true,
-          sketch: sketch
-        }
-      });
-      window.dispatchEvent(event);
-    }
+    window.dispatchEvent(event);
     
     return sketch;
   }
-  
-  /**
-   * Exit sketch mode
-   */
-  exitSketchMode() {
-    if (!this.isInSketchMode) return;
-    
-    this.isInSketchMode = false;
-    
-    // Emit an event to notify the application
-    if (typeof window !== 'undefined') {
-      const event = new CustomEvent('openshape:sketchModeChanged', { 
-        detail: { 
-          active: false,
-          sketch: this.activeSketch
-        }
-      });
-      window.dispatchEvent(event);
-    }
-    
-    this.activeSketch = null;
-  }
-  
-  /**
-   * Add a sketch entity
-   * @param {string} type - Entity type (line, rectangle, circle, etc.)
-   * @param {Object} params - Entity parameters
-   * @returns {Object} The created entity
-   */
+
+  // [Enhanced entity management with constraints and history]
   addEntity(type, params) {
-    if (!this.activeSketch) {
-      throw new Error('No active sketch');
+    if (!this.activeSketch) throw new Error('No active sketch');
+    
+    // Apply grid snapping
+    if (this.grid.snap) {
+      params = this.#applyGridSnapping(type, params);
     }
-    
+
     const entityId = `entity_${this.activeSketch.id}_${this.activeSketch.entities.length + 1}`;
-    
     const entity = {
       id: entityId,
       type,
-      params,
-      createdAt: new Date()
+      params: this.#sanitizeParams(type, params),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      constraints: params.constraints || {}
     };
-    
-    this.activeSketch.entities.push(entity);
-    
-    // Create geometry for the entity based on type
+
+    // Apply constraints
+    this.#applyConstraints(entity);
+
+    // Generate geometry
     let geometry;
-    let modelId;
-    
     switch (type) {
       case 'line':
-        geometry = this.createLineGeometry(params);
+        geometry = this.createLineGeometry(entity.params);
         break;
       case 'rectangle':
-        geometry = this.createRectangleGeometry(params);
+        geometry = this.createRectangleGeometry(entity.params);
         break;
       case 'circle':
-        geometry = this.createCircleGeometry(params);
+        geometry = this.createCircleGeometry(entity.params);
         break;
-      // Add more entity types as needed
+      // Add more entity types...
     }
-    
+
     if (geometry) {
-      // Apply plane transformation
       geometry = this.transformToSketchPlane(geometry);
-      
-      // Add to model store
-      modelId = modelStore.addModel(geometry, `${entity.type}_${entityId}`);
+      const modelId = modelStore.addModel(geometry, `${type}_${entityId}`);
       entity.modelId = modelId;
-      
-      // Notify the 3D viewer
-      notifyModelChanged({
-        id: modelId,
-        geometry,
-        name: `${entity.type}_${entityId}`,
-        isVisible: true,
-        isSketchEntity: true
-      });
+      notifyModelChanged({ id: modelId, geometry, isVisible: true });
     }
+
+    this.activeSketch.entities.push(entity);
     
+    // Record history
+    this.#recordHistory({
+      undo: () => this.deleteEntity(entity.id),
+      redo: () => {
+        this.activeSketch.entities.push(entity);
+        modelStore.addModel(geometry, entity.modelId);
+      }
+    });
+
     return entity;
   }
-  
-  /**
-   * Create line geometry
-   * @private
-   */
-  createLineGeometry(params) {
-    const { startPoint, endPoint, thickness = 0.5 } = params;
+
+  // [Enhanced update/delete methods with history tracking]
+  updateEntity(entityId, newParams) {
+    const sketch = this.activeSketch;
+    if (!sketch) throw new Error('No active sketch');
     
-    // Create a path for the line
-    const points = [
-      [startPoint[0], startPoint[1]],
-      [endPoint[0], endPoint[1]]
-    ];
-    
-    // For our transformToSketchPlane to work properly, we need to create
-    // a polygon that represents the line with thickness
-    // We'll approximate the line as a thin rectangle
-    const vector = [
-      endPoint[0] - startPoint[0],
-      endPoint[1] - startPoint[1]
-    ];
-    const length = Math.sqrt(vector[0]*vector[0] + vector[1]*vector[1]);
-    
-    // If the line has zero length, use a small circle instead
-    if (length < 0.001) {
-      return {
-        points: [
-          [startPoint[0] - thickness/2, startPoint[1] - thickness/2],
-          [startPoint[0] + thickness/2, startPoint[1] - thickness/2],
-          [startPoint[0] + thickness/2, startPoint[1] + thickness/2],
-          [startPoint[0] - thickness/2, startPoint[1] + thickness/2]
-        ]
-      };
-    }
-    
-    // Normalize the vector
-    const normalizedVector = [vector[0]/length, vector[1]/length];
-    
-    // Get perpendicular vector (rotate 90 degrees)
-    const perpVector = [-normalizedVector[1], normalizedVector[0]];
-    
-    // Scale perpendicular vector by half thickness
-    const halfThickVector = [perpVector[0] * thickness/2, perpVector[1] * thickness/2];
-    
-    // Create 4 corners of rectangle
-    const rectPoints = [
-      [startPoint[0] + halfThickVector[0], startPoint[1] + halfThickVector[1]],
-      [endPoint[0] + halfThickVector[0], endPoint[1] + halfThickVector[1]],
-      [endPoint[0] - halfThickVector[0], endPoint[1] - halfThickVector[1]],
-      [startPoint[0] - halfThickVector[0], startPoint[1] - halfThickVector[1]]
-    ];
-    
-    return { points: rectPoints };
-  }
-  
-  /**
-   * Create rectangle geometry
-   * @private
-   */
-  createRectangleGeometry(params) {
-    const { width, height, center = [0, 0] } = params;
-    const halfWidth = width / 2;
-    const halfHeight = height / 2;
-    
-    // Create the four corners of the rectangle
-    const points = [
-      [center[0] - halfWidth, center[1] - halfHeight],
-      [center[0] + halfWidth, center[1] - halfHeight],
-      [center[0] + halfWidth, center[1] + halfHeight],
-      [center[0] - halfWidth, center[1] + halfHeight]
-    ];
-    
-    return { points: points };
-  }
-  
-  /**
-   * Create circle geometry
-   * @private
-   */
-  createCircleGeometry(params) {
-    const { radius, center = [0, 0], segments = 32 } = params;
-    
-    // Approximate a circle with points
-    const points = [];
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const x = center[0] + radius * Math.cos(angle);
-      const y = center[1] + radius * Math.sin(angle);
-      points.push([x, y]);
-    }
-    
-    return { points: points };
-  }
-  
-  /**
-   * Transform geometry to the active sketch plane
-   * @private
-   */
-  transformToSketchPlane(geometry) {
-    if (!this.activeSketch) return geometry;
-    
-    // First get the 2D points from the geometry
-    // Assuming the geometry is a 2D shape in the XY plane
-    const points2D = geometry.points || [];
-    
-    if (points2D.length < 3) {
-      console.warn('Geometry has fewer than 3 points - cannot create a proper polygon');
-      // Ensure we have at least 3 points for a polygon
-      if (points2D.length === 2) {
-        // If we have 2 points (like a line), add a third point to form a triangle
-        const pt1 = points2D[0];
-        const pt2 = points2D[1];
-        // Create a point that forms a right angle with the line
-        const dx = pt2[0] - pt1[0];
-        const dy = pt2[1] - pt1[1];
-        // Perpendicular vector
-        const perpX = -dy * 0.1; // Small offset
-        const perpY = dx * 0.1;  // Small offset
-        points2D.push([pt1[0] + perpX, pt1[1] + perpY]);
-      } else if (points2D.length < 2) {
-        // If we have 0 or 1 points, we can't create a proper polygon
-        return null;
-      }
-    }
-    
-    // Map 2D points to 3D points based on the sketch plane
-    let points3D = [];
-    
-    switch (this.activeSketch.plane) {
-      case 'yz':
-        // Map to YZ plane (constant X=0)
-        points3D = points2D.map(pt => [0, pt[0], pt[1]]);
+    const entity = sketch.entities.find(e => e.id === entityId);
+    if (!entity) throw new Error('Entity not found');
+
+    const oldParams = { ...entity.params };
+    entity.params = { ...entity.params, ...newParams };
+    entity.updatedAt = new Date();
+
+    // Regenerate geometry
+    let geometry;
+    switch (entity.type) {
+      case 'line':
+        geometry = this.createLineGeometry(entity.params);
         break;
-      case 'xz':
-        // Map to XZ plane (constant Y=0)
-        points3D = points2D.map(pt => [pt[0], 0, pt[1]]);
+      case 'rectangle':
+        geometry = this.createRectangleGeometry(entity.params);
         break;
-      case 'custom':
-        // Map to XY plane with an offset
-        points3D = points2D.map(pt => [pt[0], pt[1], this.activeSketch.offset]);
+      case 'circle':
+        geometry = this.createCircleGeometry(entity.params);
         break;
-      case 'xy':
+      // Handle other types...
+    }
+
+    if (geometry) {
+      geometry = this.transformToSketchPlane(geometry);
+      modelStore.updateModel(entity.modelId, geometry);
+      notifyModelChanged({ id: entity.modelId, geometry });
+    }
+
+    // Record history
+    this.#recordHistory({
+      undo: () => this.updateEntity(entityId, oldParams),
+      redo: () => this.updateEntity(entityId, newParams)
+    });
+
+    return entity;
+  }
+
+  deleteEntity(entityId) {
+    const sketch = this.activeSketch;
+    if (!sketch) throw new Error('No active sketch');
+    
+    const index = sketch.entities.findIndex(e => e.id === entityId);
+    if (index === -1) return;
+
+    const [deleted] = sketch.entities.splice(index, 1);
+    modelStore.removeModel(deleted.modelId);
+    notifyModelChanged({ id: deleted.modelId, removed: true });
+  }
+
+  // [Undo/Redo implementation]
+  #recordHistory(action) {
+    this.history = this.history.slice(0, this.currentHistoryIndex + 1);
+    this.history.push(action);
+    this.currentHistoryIndex++;
+  }
+
+  undo() {
+    if (this.currentHistoryIndex < 0) return;
+    const action = this.history[this.currentHistoryIndex];
+    action.undo();
+    this.currentHistoryIndex--;
+  }
+
+  redo() {
+    if (this.currentHistoryIndex >= this.history.length - 1) return;
+    this.currentHistoryIndex++;
+    const action = this.history[this.currentHistoryIndex];
+    action.redo();
+  }
+
+  // [Constraint system implementation]
+  #applyConstraints(entity) {
+    switch (entity.type) {
+      case 'line':
+        if (entity.constraints?.length) {
+          const dx = entity.params.endPoint[0] - entity.params.startPoint[0];
+          const dy = entity.params.endPoint[1] - entity.params.startPoint[1];
+          const currentLength = Math.hypot(dx, dy);
+          if (currentLength === 0) return;
+          
+          const scale = entity.constraints.length / currentLength;
+          entity.params.endPoint = [
+            entity.params.startPoint[0] + dx * scale,
+            entity.params.startPoint[1] + dy * scale
+          ];
+        }
+        break;
+      case 'circle':
+        if (entity.constraints?.radius) {
+          entity.params.radius = entity.constraints.radius;
+        }
+        break;
+    }
+  }
+
+  // [Grid snapping implementation]
+  #applyGridSnapping(type, params) {
+    const snap = (point) => [
+      Math.round(point[0] / this.grid.spacing) * this.grid.spacing,
+      Math.round(point[1] / this.grid.spacing) * this.grid.spacing
+    ];
+
+    switch (type) {
+      case 'line':
+        return {
+          ...params,
+          startPoint: snap(params.startPoint),
+          endPoint: snap(params.endPoint)
+        };
+      case 'rectangle':
+        return {
+          ...params,
+          center: snap(params.center),
+          width: Math.round(params.width / this.grid.spacing) * this.grid.spacing,
+          height: Math.round(params.height / this.grid.spacing) * this.grid.spacing
+        };
+      case 'circle':
+        return {
+          ...params,
+          center: snap(params.center),
+          radius: Math.round(params.radius / this.grid.spacing) * this.grid.spacing
+        };
       default:
-        // Map to XY plane (constant Z=0)
-        points3D = points2D.map(pt => [pt[0], pt[1], 0]);
-        break;
-    }
-    
-    // Create a polygon object with the 3D points
-    try {
-      return jscad.primitives.polygon({ points: points3D });
-    } catch (error) {
-      console.error('Error creating polygon:', error);
-      console.error('Points:', points3D);
-      return null;
+        return params;
     }
   }
-  
-  /**
-   * Extrude the active sketch
-   * @param {number} height - Extrusion height
-   * @returns {string} Model ID of the extruded shape
-   */
+
+  // [Layer management]
+  toggleLayerVisibility(layerId) {
+    const layer = this.layers[layerId];
+    if (layer) {
+      layer.visible = !layer.visible;
+      Object.values(this.sketches).forEach(sketch => {
+        if (sketch.layer === layerId) {
+          modelStore.setModelVisibility(sketch.planeModelId, layer.visible);
+          sketch.entities.forEach(entity => {
+            modelStore.setModelVisibility(entity.modelId, layer.visible);
+          });
+        }
+      });
+    }
+  }
+
+  // [Enhanced extrusion validation]
   extrudeActiveSketch(height) {
     if (!this.activeSketch || this.activeSketch.entities.length === 0) {
       throw new Error('No active sketch or sketch is empty');
     }
-    
-    // Collect all 2D geometries from the sketch
-    const sketchGeometries = this.activeSketch.entities.map(entity => {
-      const model = modelStore.getModel(entity.modelId);
-      return model ? model.geometry : null;
-    }).filter(Boolean);
-    
+
+    const sketchGeometries = this.activeSketch.entities
+      .map(entity => modelStore.getModel(entity.modelId)?.geometry)
+      .filter(Boolean);
+
     if (sketchGeometries.length === 0) {
       throw new Error('No valid geometries in sketch');
     }
-    
-    // Union all geometries if there are multiple entities
-    let combinedGeometry;
-    if (sketchGeometries.length === 1) {
-      combinedGeometry = sketchGeometries[0];
-    } else {
-      combinedGeometry = jscad.booleans.union(sketchGeometries);
+
+    try {
+      jscad.measurements.measureVolume(
+        jscad.booleans.union(sketchGeometries)
+      );
+    } catch (e) {
+      throw new Error('Invalid geometry for extrusion');
     }
+
+    // Create extrusion
+    const unionGeometry = jscad.booleans.union(sketchGeometries);
+    const extruded = jscad.extrusions.extrudeLinear(
+      { height, twistAngle: 0 }, 
+      unionGeometry
+    );
     
-    // Extrude the combined geometry
-    const extruded = jscad.extrusions.extrudeLinear({ height }, combinedGeometry);
+    // Add it to model store
+    const modelId = modelStore.addModel(extruded, `extrusion_${this.activeSketch.id}`);
     
-    // Add to model store
-    const modelId = modelStore.addModel(extruded, `Extruded ${this.activeSketch.name}`);
-    
-    // Notify the 3D viewer
-    notifyModelChanged({
-      id: modelId,
-      geometry: extruded,
-      name: `Extruded ${this.activeSketch.name}`,
-      isVisible: true
-    });
-    
-    // Exit sketch mode
-    this.exitSketchMode();
+    // Notify about the new model
+    notifyModelChanged({ id: modelId, geometry: extruded, isVisible: true });
     
     return modelId;
   }
+
+  // [Selection management]
+  setSelectedEntities(entityIds) {
+    this.selectedEntities = new Set(entityIds);
+    this.#emitSelectionEvent();
+  }
+
+  #emitSelectionEvent() {
+    const event = new CustomEvent('openshape:selectionChanged', {
+      detail: Array.from(this.selectedEntities)
+    });
+    window.dispatchEvent(event);
+  }
+
+  // Implementation of missing methods
   
-  /**
-   * Get all sketches
-   * @returns {Array} Array of sketches
-   */
-  getAllSketches() {
-    return Object.values(this.sketches);
+  // Parameters validation and sanitization
+  #sanitizeParams(type, params) {
+    const sanitized = {...params};
+    
+    switch (type) {
+      case 'line':
+        if (!Array.isArray(sanitized.startPoint) || sanitized.startPoint.length < 2) {
+          sanitized.startPoint = [0, 0];
+        }
+        if (!Array.isArray(sanitized.endPoint) || sanitized.endPoint.length < 2) {
+          sanitized.endPoint = [1, 0];
+        }
+        break;
+        
+      case 'rectangle':
+        if (!Array.isArray(sanitized.center) || sanitized.center.length < 2) {
+          sanitized.center = [0, 0];
+        }
+        if (typeof sanitized.width !== 'number' || sanitized.width <= 0) {
+          sanitized.width = 1;
+        }
+        if (typeof sanitized.height !== 'number' || sanitized.height <= 0) {
+          sanitized.height = 1;
+        }
+        break;
+        
+      case 'circle':
+        if (!Array.isArray(sanitized.center) || sanitized.center.length < 2) {
+          sanitized.center = [0, 0];
+        }
+        if (typeof sanitized.radius !== 'number' || sanitized.radius <= 0) {
+          sanitized.radius = 1;
+        }
+        break;
+        
+      // Add more types as needed
+    }
+    
+    return sanitized;
   }
   
-  /**
-   * Get a sketch by ID
-   * @param {string} id - Sketch ID
-   * @returns {Object} The sketch, or null if not found
-   */
-  getSketch(id) {
-    return this.sketches[id] || null;
+  // Transform 2D geometry to the active sketch plane
+  transformToSketchPlane(geometry) {
+    if (!this.activeSketch) throw new Error('No active sketch');
+    
+    // Check if we have at least 3 points to create a proper polygon
+    if (!geometry.points || geometry.points.length < 3) {
+      console.warn('Geometry has less than 3 points, which may not be suitable for creating a polygon');
+      
+      // If we have 2 points, create a third point to form a triangle
+      if (geometry.points && geometry.points.length === 2) {
+        const [p1, p2] = geometry.points;
+        // Calculate a perpendicular vector to form a triangle
+        const dx = p2[0] - p1[0];
+        const dy = p2[1] - p1[1];
+        const perpLength = 0.1; // Small perpendicular offset
+        const perpX = -dy * perpLength;
+        const perpY = dx * perpLength;
+        
+        // Add a third point perpendicular to the line
+        geometry.points.push([p1[0] + perpX, p1[1] + perpY]);
+      } else if (!geometry.points || geometry.points.length < 2) {
+        console.error('Cannot transform geometry with less than 2 points');
+        return null;
+      }
+    }
+    
+    try {
+      // Map 2D points to 3D based on the active sketch plane
+      const points3D = geometry.points.map(point => {
+        const [x, y] = point;
+        const offset = this.activeSketch.offset || 0;
+        
+        switch (this.activeSketch.plane) {
+          case 'yz':
+            // X is fixed, Y and Z are variable
+            return [offset, x, y];
+          case 'xz':
+            // Y is fixed, X and Z are variable
+            return [x, offset, y];
+          case 'custom':
+            // Custom plane logic would go here
+            // For now, treating it as XY plane with offset Z
+            return [x, y, offset];
+          case 'xy':
+          default:
+            // Z is fixed, X and Y are variable
+            return [x, y, offset];
+        }
+      });
+      
+      // Create a 3D polygon from the points
+      return jscad.primitives.polygon({ points: points3D });
+    } catch (error) {
+      console.error('Error transforming geometry to sketch plane:', error, geometry);
+      return null;
+    }
   }
   
-  /**
-   * Get the active sketch
-   * @returns {Object} The active sketch, or null if none
-   */
+  // Create geometry for a line
+  createLineGeometry(params) {
+    const { startPoint, endPoint } = params;
+    
+    // Return a geometry that has points property for consistency
+    return {
+      points: [startPoint, endPoint]
+    };
+  }
+  
+  // Create geometry for a rectangle
+  createRectangleGeometry(params) {
+    const { center, width, height } = params;
+    const [cx, cy] = center;
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
+    
+    // Create points for the rectangle corners
+    const points = [
+      [cx - halfWidth, cy - halfHeight],
+      [cx + halfWidth, cy - halfHeight],
+      [cx + halfWidth, cy + halfHeight],
+      [cx - halfWidth, cy + halfHeight]
+    ];
+    
+    return { points };
+  }
+  
+  // Create geometry for a circle
+  createCircleGeometry(params) {
+    const { center, radius } = params;
+    const [cx, cy] = center;
+    
+    // Approximate a circle with points (enough for visualization)
+    const numSegments = 32;
+    const points = [];
+    
+    for (let i = 0; i < numSegments; i++) {
+      const angle = (i / numSegments) * Math.PI * 2;
+      const x = cx + Math.cos(angle) * radius;
+      const y = cy + Math.sin(angle) * radius;
+      points.push([x, y]);
+    }
+    
+    return { points };
+  }
+
+  // Get the active sketch
   getActiveSketch() {
     return this.activeSketch;
   }
-  
-  /**
-   * Check if in sketch mode
-   * @returns {boolean} Whether in sketch mode
-   */
-  getIsInSketchMode() {
-    return this.isInSketchMode;
-  }
 }
 
-// Create a singleton instance
+// Singleton instance
 const sketchManager = new SketchManager();
-
-export default sketchManager; 
+export default sketchManager;

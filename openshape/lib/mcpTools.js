@@ -1197,8 +1197,8 @@ const registerSketchingTools = () => {
   });
 };
 
-// Export all needed items
-export { modelStore, notifyModelChanged, initializeTools };
+// Export modelStore and notifyModelChanged as named exports
+export { modelStore, notifyModelChanged };
 
 // Export initializeTools as the default export
 export default initializeTools; 

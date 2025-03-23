@@ -32,6 +32,8 @@ import {
   X,
   Ruler,
   Bot,
+  Terminal as TerminalIcon,
+  MessageSquare,
 } from "lucide-react"
 import { useUnits } from '../contexts/UnitContext'
 import initializeTools from '../lib/mcpTools';
@@ -42,6 +44,7 @@ import ExportModelDialog from '../components/ExportModelDialog'
 import SketchButton from '../components/SketchButton'
 import PlaneSelectionDialog from '../components/PlaneSelectionDialog'
 import sketchManager from '../lib/sketchManager'
+import { toggleTerminal } from '../components/CodeTerminal';
 
 // Placeholder component for JscadThreeViewer
 const PlaceholderViewer = () => {
@@ -86,6 +89,11 @@ const SketchToolbar = dynamic(() => import('../components/SketchToolbar'), {
   ssr: false,
 })
 
+// Import the Code Terminal component
+const CodeTerminal = dynamic(() => import('../components/CodeTerminal'), {
+  ssr: false,
+})
+
 export default function CadInterface() {
   const [mounted, setMounted] = useState(false)
   const [expandedFeatures, setExpandedFeatures] = useState(true)
@@ -108,6 +116,7 @@ export default function CadInterface() {
   const [showPartDialog, setShowPartDialog] = useState(false);
   const [selectedPartType, setSelectedPartType] = useState(null);
   const [partParameters, setPartParameters] = useState({});
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
   // Fake data for the UI mockup
   const featureItems = [
@@ -429,32 +438,145 @@ export default function CadInterface() {
             </button>
           </div>
 
-          <div className="flex items-center ml-auto space-x-1">
-            <button 
-              className={`flex items-center justify-center w-8 h-8 rounded ${isAIAssistantOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
-              onClick={toggleAIAssistant}
-              title="AI Assistant"
-            >
-              <Bot size={16} />
-            </button>
-            <button 
-              className="flex items-center justify-center w-8 h-8 text-gray-600 hover:bg-gray-100 rounded"
-              onClick={toggleUserGuide}
-            >
-              <Info size={16} />
-            </button>
-            <div className="flex items-center border border-gray-300 rounded overflow-hidden">
-              <button className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100">0</button>
-              <div className="h-4 border-r border-gray-300"></div>
-              <button className="px-2 py-1 text-xs text-gray-600 hover:bg-gray-100">0</button>
+          {/* Core toolbar with drawing tools */}
+          <div className="flex-1 flex items-center">
+            {/* View tools */}
+            <div className="flex items-center pr-3 mr-3 border-r border-gray-200">
+              {viewTools.map((tool) => (
+                <button
+                  key={tool.id}
+                  className="flex items-center px-2 py-1 mx-0.5 text-xs text-gray-700 hover:bg-gray-100 rounded"
+                  title={tool.label}
+                >
+                  {tool.icon}
+                  <span className="ml-1">{tool.label}</span>
+                </button>
+              ))}
             </div>
-            <button className="flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded">
-              <Share size={14} className="mr-1.5" />
-              Share
-            </button>
-            <button className="flex items-center justify-center w-8 h-8 text-gray-600 hover:bg-gray-100 rounded">
-              <Settings size={16} />
-            </button>
+
+            {/* Create Sketch Button - only show when Sketch tab is active */}
+            {(activeTab === "sketch" && !isInSketchMode) && (
+              <div className="flex items-center pr-3 mr-3 border-r border-gray-200">
+                <SketchButton onClick={handleCreateSketch} className="mx-1" />
+              </div>
+            )}
+
+            {/* Active tab tools */}
+            <div className="flex items-center pr-3 mr-3 border-r border-gray-200">
+              {activeTab === "sketch" ? (
+                <>
+                  {sketchTools.map((tool) => (
+                    <button
+                      key={tool.id}
+                      className="flex items-center justify-center w-8 h-8 mx-0.5 text-gray-700 hover:bg-gray-100 rounded"
+                      title={tool.tooltip}
+                    >
+                      {tool.icon}
+                    </button>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {modelTools.map((tool) => (
+                    <button
+                      key={tool.id}
+                      className="flex items-center justify-center w-8 h-8 mx-0.5 text-gray-700 hover:bg-gray-100 rounded"
+                      title={tool.tooltip}
+                    >
+                      {tool.icon}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+
+            {/* View mode tools */}
+            <div className="flex items-center pr-3 mr-3 border-r border-gray-200">
+              <button
+                className={`flex items-center justify-center w-8 h-8 mx-0.5 rounded ${viewMode === "wireframe" ? "bg-blue-100 text-blue-600" : "text-gray-700 hover:bg-gray-100"}`}
+                title="Wireframe"
+                onClick={() => setViewMode("wireframe")}
+              >
+                <Grid size={16} />
+              </button>
+              <button
+                className={`flex items-center justify-center w-8 h-8 mx-0.5 rounded ${viewMode === "shaded" ? "bg-blue-100 text-blue-600" : "text-gray-700 hover:bg-gray-100"}`}
+                title="Shaded"
+                onClick={() => setViewMode("shaded")}
+              >
+                <Box size={16} />
+              </button>
+              <button
+                className={`flex items-center justify-center w-8 h-8 mx-0.5 rounded ${viewMode === "rendered" ? "bg-blue-100 text-blue-600" : "text-gray-700 hover:bg-gray-100"}`}
+                title="Rendered"
+                onClick={() => setViewMode("rendered")}
+              >
+                <Maximize size={16} />
+              </button>
+            </div>
+
+            {/* Navigation tools */}
+            <div className="flex items-center">
+              <button
+                className="flex items-center justify-center w-8 h-8 mx-0.5 text-gray-700 hover:bg-gray-100 rounded"
+                title="Pan"
+              >
+                <Move size={16} />
+              </button>
+              <button
+                className="flex items-center justify-center w-8 h-8 mx-0.5 text-gray-700 hover:bg-gray-100 rounded"
+                title="Rotate"
+              >
+                <RotateCcw size={16} />
+              </button>
+              <button
+                className="flex items-center justify-center w-8 h-8 mx-0.5 text-gray-700 hover:bg-gray-100 rounded"
+                title="Zoom In"
+              >
+                <ZoomIn size={16} />
+              </button>
+              <button
+                className="flex items-center justify-center w-8 h-8 mx-0.5 text-gray-700 hover:bg-gray-100 rounded"
+                title="Zoom Out"
+              >
+                <ZoomOut size={16} />
+              </button>
+            </div>
+
+            {/* Search box */}
+            <div className="flex items-center ml-auto">
+              <div className="flex items-center px-2 py-1 border border-gray-300 rounded">
+                <input type="text" placeholder="Search tools..." className="w-40 text-sm border-none outline-none" />
+                <Search size={14} className="text-gray-500" />
+              </div>
+            </div>
+
+            {/* Right side controls */}
+            <div className="flex items-center ml-auto">
+              {/* Add Terminal button */}
+              <button 
+                className={`flex items-center justify-center w-8 h-8 mx-0.5 rounded ${
+                  isTerminalOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-700 hover:bg-gray-100'
+                }`}
+                title="JSCAD Terminal (Ctrl + `)"
+                onClick={toggleTerminal}
+              >
+                <TerminalIcon size={16} />
+              </button>
+              
+              {/* AI Assistant button (already existing) */}
+              <button 
+                className={`flex items-center justify-center w-8 h-8 mx-0.5 rounded ${
+                  isAIAssistantOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-700 hover:bg-gray-100'
+                }`}
+                title="AI CAD Assistant"
+                onClick={toggleAIAssistant}
+              >
+                <MessageSquare size={16} />
+              </button>
+              
+              {/* ... any other existing buttons ... */}
+            </div>
           </div>
         </header>
 
@@ -722,10 +844,12 @@ export default function CadInterface() {
             )}
 
             {/* AI Assistant */}
-            <AICadAssistant
-              isOpen={isAIAssistantOpen}
-              onToggle={toggleAIAssistant}
-            />
+            {isAIAssistantOpen && (
+              <AICadAssistant 
+                isOpen={isAIAssistantOpen}
+                onToggle={toggleAIAssistant}
+              />
+            )}
 
             {/* Coordinate system indicator */}
             <div className="absolute right-4 bottom-4 w-20 h-20 flex items-center justify-center bg-white bg-opacity-80 rounded-full shadow-md">
@@ -891,6 +1015,11 @@ export default function CadInterface() {
           </div>
         </div>
       )}
+
+      {/* Code Terminal */}
+      <CodeTerminal 
+        onVisibilityChange={setIsTerminalOpen} 
+      />
     </>
   )
 }

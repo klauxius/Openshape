@@ -5,6 +5,12 @@ import * as jscad from '@jscad/modeling';
 import { modelStore, notifyModelChanged } from './mcpTools';
 import sketchManager from './sketchManager';
 
+// Notify observers about operation history changes
+const notifyOperationHistoryChanged = () => {
+  const event = new CustomEvent('openshape:operationHistoryChanged');
+  window.dispatchEvent(event);
+};
+
 // Operation history management
 const operationHistory = {
   operations: [],
@@ -18,6 +24,9 @@ const operationHistory = {
     
     this.operations.push(operation);
     this.currentIndex = this.operations.length - 1;
+    
+    // Notify about history change
+    notifyOperationHistoryChanged();
   },
   
   undo() {
@@ -27,6 +36,9 @@ const operationHistory = {
         operation.undo();
       }
       this.currentIndex--;
+      
+      // Notify about history change
+      notifyOperationHistoryChanged();
       return true;
     }
     return false;
@@ -39,6 +51,9 @@ const operationHistory = {
       if (operation.redo && typeof operation.redo === 'function') {
         operation.redo();
       }
+      
+      // Notify about history change
+      notifyOperationHistoryChanged();
       return true;
     }
     return false;

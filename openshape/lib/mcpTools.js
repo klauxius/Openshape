@@ -4,6 +4,7 @@
 import mcpClient from './mcpClient';
 import * as jscad from '@jscad/modeling';
 import partsLibrary from './partsLibrary';
+import CADOperations from './cadOperations';
 
 // Store created models for reference and operations
 const modelStore = {
@@ -11,34 +12,27 @@ const modelStore = {
   activeModelId: null,
   nextId: 1,
   
-  addModel: function(model, name) {
-    const id = `model_${this.nextId++}`;
-    this.models[id] = {
-      id,
+  addModel: function(model, name, id = null) {
+    const modelId = id || `model_${this.nextId++}`;
+    this.models[modelId] = {
+      id: modelId,
       name: name || `Model ${this.nextId-1}`,
       geometry: model,
       isVisible: true,
       createdAt: new Date()
     };
-    this.activeModelId = id;
-    return id;
+    
+    return modelId;
   },
   
   getModel: function(id) {
-    return this.models[id] || null;
+    return this.models[id];
   },
   
-  getAllModels: function() {
-    return Object.values(this.models);
-  },
-  
-  getActiveModel: function() {
-    return this.models[this.activeModelId] || null;
-  },
-  
-  setActiveModel: function(id) {
+  updateModel: function(id, geometry) {
     if (this.models[id]) {
-      this.activeModelId = id;
+      this.models[id].geometry = geometry;
+      this.models[id].updatedAt = new Date();
       return true;
     }
     return false;
@@ -46,29 +40,55 @@ const modelStore = {
   
   removeModel: function(id) {
     if (this.models[id]) {
-      const wasActive = (id === this.activeModelId);
       delete this.models[id];
-      
-      if (wasActive) {
-        const modelIds = Object.keys(this.models);
-        this.activeModelId = modelIds.length > 0 ? modelIds[0] : null;
-      }
-      
       return true;
     }
     return false;
+  },
+  
+  setActiveModel: function(id) {
+    if (id === null || this.models[id]) {
+      this.activeModelId = id;
+      return true;
+    }
+    return false;
+  },
+  
+  getActiveModel: function() {
+    return this.activeModelId ? this.models[this.activeModelId] : null;
+  },
+  
+  setModelVisibility: function(id, isVisible) {
+    if (this.models[id]) {
+      this.models[id].isVisible = isVisible;
+      return true;
+    }
+    return false;
+  },
+  
+  getAllModels: function() {
+    return Object.values(this.models);
+  },
+  
+  getVisibleModels: function() {
+    return Object.values(this.models).filter(model => model.isVisible);
   }
 };
 
-// Notify the viewer that a model has changed
+// Export modelStore for use in other modules
+export { modelStore };
+
+// Notify observers about model changes
 const notifyModelChanged = (modelData) => {
-  if (typeof window !== 'undefined') {
-    const event = new CustomEvent('openshape:modelChanged', { 
-      detail: { model: modelData }
-    });
-    window.dispatchEvent(event);
-  }
+  const event = new CustomEvent('openshape:modelChanged', {
+    detail: modelData
+  });
+  window.dispatchEvent(event);
+  return modelData;
 };
+
+// Export notifyModelChanged for use in other modules
+export { notifyModelChanged };
 
 /**
  * Initialize and register all MCP tools
@@ -80,6 +100,7 @@ const initializeTools = () => {
   registerBooleanOperationTools();
   registerUtilityTools();
   registerSketchingTools(); // Register 2D sketching tools
+  registerCADOperationsTools(); // Register new structured CAD operations
 };
 
 /**
@@ -1197,8 +1218,233 @@ const registerSketchingTools = () => {
   });
 };
 
-// Export modelStore and notifyModelChanged as named exports
-export { modelStore, notifyModelChanged };
+/**
+ * Register structured CAD operations tools that connect to our CADOperations library
+ */
+const registerCADOperationsTools = () => {
+  // Create cube operation
+  mcpClient.registerTool({
+    name: 'cadCreateCube',
+    description: 'Create a cube or box in 3D space',
+    parameters: [
+      { name: 'width', type: 'number', description: 'Width of the cube', default: 10 },
+      { name: 'height', type: 'number', description: 'Height of the cube', default: 10 },
+      { name: 'depth', type: 'number', description: 'Depth of the cube', default: 10 },
+      { name: 'position', type: 'array', description: 'Position of the cube center [x, y, z]', default: [0, 0, 0] },
+      { name: 'name', type: 'string', description: 'Name for the cube', default: 'Cube' }
+    ],
+    patterns: [
+      "create a cube",
+      "make a box",
+      "add a cuboid",
+      "create a rectangular prism"
+    ],
+    execute: async (params) => {
+      console.log('Creating cube with params:', params);
+      return CADOperations.createCube(params);
+    }
+  });
+  
+  // Create sphere operation
+  mcpClient.registerTool({
+    name: 'cadCreateSphere',
+    description: 'Create a sphere in 3D space',
+    parameters: [
+      { name: 'radius', type: 'number', description: 'Radius of the sphere', default: 5 },
+      { name: 'segments', type: 'number', description: 'Number of segments (resolution)', default: 32 },
+      { name: 'position', type: 'array', description: 'Position of the sphere center [x, y, z]', default: [0, 0, 0] },
+      { name: 'name', type: 'string', description: 'Name for the sphere', default: 'Sphere' }
+    ],
+    patterns: [
+      "create a sphere",
+      "make a ball",
+      "add a spherical object"
+    ],
+    execute: async (params) => {
+      console.log('Creating sphere with params:', params);
+      return CADOperations.createSphere(params);
+    }
+  });
+  
+  // Create cylinder operation
+  mcpClient.registerTool({
+    name: 'cadCreateCylinder',
+    description: 'Create a cylinder in 3D space',
+    parameters: [
+      { name: 'radius', type: 'number', description: 'Radius of the cylinder', default: 5 },
+      { name: 'height', type: 'number', description: 'Height of the cylinder', default: 10 },
+      { name: 'segments', type: 'number', description: 'Number of segments (resolution)', default: 32 },
+      { name: 'position', type: 'array', description: 'Position of the cylinder center [x, y, z]', default: [0, 0, 0] },
+      { name: 'name', type: 'string', description: 'Name for the cylinder', default: 'Cylinder' }
+    ],
+    patterns: [
+      "create a cylinder",
+      "make a cylindrical shape",
+      "add a rod",
+      "create a tube"
+    ],
+    execute: async (params) => {
+      console.log('Creating cylinder with params:', params);
+      return CADOperations.createCylinder(params);
+    }
+  });
+  
+  // Create sketch operation
+  mcpClient.registerTool({
+    name: 'cadCreateSketch',
+    description: 'Create a new sketch on a plane',
+    parameters: [
+      { name: 'plane', type: 'string', description: 'Plane for sketch (xy, yz, xz, or custom)', default: 'xy' },
+      { name: 'offset', type: 'number', description: 'Offset from origin for the plane', default: 0 }
+    ],
+    patterns: [
+      "create a sketch",
+      "start a new sketch",
+      "make a sketch plane",
+      "begin sketching"
+    ],
+    execute: async (params) => {
+      console.log('Creating sketch with params:', params);
+      return CADOperations.createSketch(params);
+    }
+  });
+  
+  // Boolean union operation
+  mcpClient.registerTool({
+    name: 'cadUnion',
+    description: 'Create a union of multiple models',
+    parameters: [
+      { name: 'modelIds', type: 'array', description: 'Array of model IDs to union', required: true },
+      { name: 'name', type: 'string', description: 'Name for the union result', default: 'Union' }
+    ],
+    patterns: [
+      "combine models",
+      "merge objects",
+      "union models",
+      "join geometry"
+    ],
+    execute: async (params) => {
+      console.log('Creating union with params:', params);
+      return CADOperations.union(params);
+    }
+  });
+  
+  // Boolean subtraction operation
+  mcpClient.registerTool({
+    name: 'cadSubtract',
+    description: 'Subtract models from a target model',
+    parameters: [
+      { name: 'modelId', type: 'string', description: 'Target model ID', required: true },
+      { name: 'subtractIds', type: 'array', description: 'Array of model IDs to subtract', required: true },
+      { name: 'name', type: 'string', description: 'Name for the subtraction result', default: 'Difference' }
+    ],
+    patterns: [
+      "subtract models",
+      "cut out from model",
+      "remove material",
+      "make hole"
+    ],
+    execute: async (params) => {
+      console.log('Creating subtraction with params:', params);
+      return CADOperations.subtract(params);
+    }
+  });
+  
+  // Model translation operation
+  mcpClient.registerTool({
+    name: 'cadTranslate',
+    description: 'Translate (move) a model',
+    parameters: [
+      { name: 'modelId', type: 'string', description: 'ID of the model to translate', required: true },
+      { name: 'translation', type: 'array', description: 'Translation vector [x, y, z]', required: true },
+      { name: 'name', type: 'string', description: 'Name for the translated model', default: '' }
+    ],
+    patterns: [
+      "move model",
+      "translate object",
+      "reposition geometry"
+    ],
+    execute: async (params) => {
+      console.log('Translating model with params:', params);
+      return CADOperations.translate(params);
+    }
+  });
+  
+  // Model rotation operation
+  mcpClient.registerTool({
+    name: 'cadRotate',
+    description: 'Rotate a model',
+    parameters: [
+      { name: 'modelId', type: 'string', description: 'ID of the model to rotate', required: true },
+      { name: 'rotation', type: 'array', description: 'Rotation angles in degrees [rotX, rotY, rotZ]', required: true },
+      { name: 'name', type: 'string', description: 'Name for the rotated model', default: '' }
+    ],
+    patterns: [
+      "rotate model",
+      "turn object",
+      "spin geometry"
+    ],
+    execute: async (params) => {
+      console.log('Rotating model with params:', params);
+      return CADOperations.rotate(params);
+    }
+  });
+  
+  // Extrude sketch operation
+  mcpClient.registerTool({
+    name: 'cadExtrudeSketch',
+    description: 'Extrude the active sketch to create a 3D model',
+    parameters: [
+      { name: 'height', type: 'number', description: 'Extrusion height', default: 10 }
+    ],
+    patterns: [
+      "extrude sketch",
+      "convert sketch to 3d",
+      "make sketch into solid"
+    ],
+    execute: async (params) => {
+      console.log('Extruding sketch with params:', params);
+      return CADOperations.extrudeSketch(params);
+    }
+  });
+  
+  // History operations
+  mcpClient.registerTool({
+    name: 'cadUndo',
+    description: 'Undo the last CAD operation',
+    parameters: [],
+    patterns: [
+      "undo",
+      "reverse last operation",
+      "go back"
+    ],
+    execute: async () => {
+      const success = CADOperations.undo();
+      return {
+        success,
+        message: success ? 'Undid last operation' : 'Nothing to undo'
+      };
+    }
+  });
+  
+  mcpClient.registerTool({
+    name: 'cadRedo',
+    description: 'Redo the previously undone CAD operation',
+    parameters: [],
+    patterns: [
+      "redo",
+      "repeat operation",
+      "go forward"
+    ],
+    execute: async () => {
+      const success = CADOperations.redo();
+      return {
+        success,
+        message: success ? 'Redid operation' : 'Nothing to redo'
+      };
+    }
+  });
+};
 
 // Export initializeTools as the default export
 export default initializeTools; 

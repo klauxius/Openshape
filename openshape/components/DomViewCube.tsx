@@ -59,22 +59,22 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
       // Looking along X axis
       if (forward.x > 0) {
         // Right view (+X)
-        setCameraRotation({ x: 0, y: -90, z: 0 });
+        setCameraRotation({ x: 0, y: 90, z: 0 });
         return;
       } else {
         // Left view (-X)
-        setCameraRotation({ x: 0, y: 90, z: 0 });
+        setCameraRotation({ x: 0, y: -90, z: 0 });
         return;
       }
     } else if (Math.abs(forward.y) > tolerance) {
       // Looking along Y axis
       if (forward.y > 0) {
         // Bottom view (+Y)
-        setCameraRotation({ x: 90, y: 0, z: 0 });
+        setCameraRotation({ x: -90, y: 0, z: 0 });
         return;
       } else {
         // Top view (-Y)
-        setCameraRotation({ x: -90, y: 0, z: 0 });
+        setCameraRotation({ x: 90, y: 0, z: 0 });
         return;
       }
     } else if (Math.abs(forward.z) > tolerance) {
@@ -94,10 +94,11 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     const quaternion = camera.quaternion.clone();
     const euler = new THREE.Euler().setFromQuaternion(quaternion, "XYZ");
     
-    // Convert to degrees and apply with reversed signs to counter-rotate
-    const rotX = THREE.MathUtils.radToDeg(euler.x) * -1;
-    const rotY = THREE.MathUtils.radToDeg(euler.y) * -1;
-    const rotZ = THREE.MathUtils.radToDeg(euler.z) * -1;
+    // Convert to degrees and apply WITHOUT reversing signs
+    // This ensures the view cube rotates in the same direction as the camera
+    const rotX = THREE.MathUtils.radToDeg(euler.x);
+    const rotY = THREE.MathUtils.radToDeg(euler.y);
+    const rotZ = THREE.MathUtils.radToDeg(euler.z);
 
     // Limit update frequency to prevent constant recalculation
     // Only update if the rotation changed significantly
@@ -266,16 +267,16 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
         x = 0; y = 180; z = 0;
         break;
       case "right":
-        x = 0; y = -90; z = 0; 
+        x = 0; y = 90; z = 0; 
         break;
       case "left":
-        x = 0; y = 90; z = 0;
+        x = 0; y = -90; z = 0;
         break;
       case "top":
-        x = -90; y = 0; z = 0;
+        x = 90; y = 0; z = 0;
         break;
       case "bottom":
-        x = 90; y = 0; z = 0;
+        x = -90; y = 0; z = 0;
         break;
     }
     

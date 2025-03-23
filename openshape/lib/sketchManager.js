@@ -63,64 +63,85 @@ class SketchManager {
     };
 
     // Create a visualization of the sketch plane
-    let planePolygon;
     const planeSize = 10;
+    let planeVisualization;
     
-    switch (planeInfo.plane) {
-      case 'yz':
-        // YZ plane at specified X
-        planePolygon = {
-          points: [
-            [planeInfo.offset || 0, -planeSize, -planeSize],
-            [planeInfo.offset || 0, planeSize, -planeSize],
-            [planeInfo.offset || 0, planeSize, planeSize],
-            [planeInfo.offset || 0, -planeSize, planeSize]
-          ]
-        };
-        break;
-      case 'xz':
-        // XZ plane at specified Y
-        planePolygon = {
-          points: [
-            [-planeSize, planeInfo.offset || 0, -planeSize],
-            [planeSize, planeInfo.offset || 0, -planeSize],
-            [planeSize, planeInfo.offset || 0, planeSize],
-            [-planeSize, planeInfo.offset || 0, planeSize]
-          ]
-        };
-        break;
-      case 'custom':
-        // Custom plane - placeholder for more advanced implementation
-        planePolygon = {
-          points: [
-            [-planeSize, -planeSize, planeInfo.offset || 0],
-            [planeSize, -planeSize, planeInfo.offset || 0],
-            [planeSize, planeSize, planeInfo.offset || 0],
-            [-planeSize, planeSize, planeInfo.offset || 0]
-          ]
-        };
-        break;
-      case 'xy':
-      default:
-        // XY plane at specified Z
-        planePolygon = {
-          points: [
-            [-planeSize, -planeSize, planeInfo.offset || 0],
-            [planeSize, -planeSize, planeInfo.offset || 0],
-            [planeSize, planeSize, planeInfo.offset || 0],
-            [-planeSize, planeSize, planeInfo.offset || 0]
-          ]
-        };
+    try {
+      // Create the plane using a more robust method
+      // Use a simple rectangle primitive instead of a polygon
+      // This ensures we always have a valid planar surface
+      switch (planeInfo.plane) {
+        case 'yz': {
+          // YZ plane (rectangle) at specified X
+          // Create rectangle in YZ plane
+          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
+          // Rotate to align with YZ plane
+          const rotated = jscad.transforms.rotateY(Math.PI / 2, rect);
+          // Then translate to desired X position
+          planeVisualization = jscad.transforms.translate([planeInfo.offset || 0, 0, 0], rotated);
+          break;
+        }
+        case 'xz': {
+          // XZ plane (rectangle) at specified Y
+          // Create rectangle in XZ plane
+          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
+          // Rotate to align with XZ plane
+          const rotated = jscad.transforms.rotateX(Math.PI / 2, rect);
+          // Then translate to desired Y position
+          planeVisualization = jscad.transforms.translate([0, planeInfo.offset || 0, 0], rotated);
+          break;
+        }
+        case 'custom': {
+          // For now, handle custom plane as XY at specified Z (can be enhanced later)
+          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
+          planeVisualization = jscad.transforms.translate([0, 0, planeInfo.offset || 0], rect);
+          break;
+        }
+        case 'xy':
+        default: {
+          // XY plane (rectangle) at specified Z
+          const rect = jscad.primitives.rectangle({ size: [planeSize * 2, planeSize * 2] });
+          planeVisualization = jscad.transforms.translate([0, 0, planeInfo.offset || 0], rect);
+          break;
+        }
+      }
+      
+      // Convert 2D rectangle to 3D by giving it a small thickness
+      planeVisualization = jscad.extrusions.extrudeLinear(
+        { height: 0.01, twistAngle: 0 },
+        planeVisualization
+      );
+      
+    } catch (error) {
+      console.error('Error creating sketch plane visualization:', error);
+      // As a fallback, use a simple cube with very small height to represent the plane
+      // This ensures we always have a valid geometry even if other methods fail
+      planeVisualization = jscad.primitives.cuboid({ 
+        size: [planeSize * 2, planeSize * 2, 0.01] 
+      });
+      
+      // Position the fallback plane correctly
+      switch (planeInfo.plane) {
+        case 'yz':
+          planeVisualization = jscad.transforms.translate(
+            [planeInfo.offset || 0, 0, 0], 
+            jscad.transforms.rotateY(Math.PI / 2, planeVisualization)
+          );
+          break;
+        case 'xz':
+          planeVisualization = jscad.transforms.translate(
+            [0, planeInfo.offset || 0, 0], 
+            jscad.transforms.rotateX(Math.PI / 2, planeVisualization)
+          );
+          break;
+        case 'xy':
+        default:
+          planeVisualization = jscad.transforms.translate(
+            [0, 0, planeInfo.offset || 0], 
+            planeVisualization
+          );
+      }
     }
-    
-    // Create the plane geometry as a polygon for proper extrusion
-    const planeGeometry = jscad.primitives.polygon(planePolygon);
-    
-    // Create a thin extrusion to visualize the plane
-    const planeVisualization = jscad.extrusions.extrudeLinear(
-      { height: 0.05, twistAngle: 0 },
-      planeGeometry
-    );
     
     // Add the plane visualization to the model store
     const planeModelId = modelStore.addModel(

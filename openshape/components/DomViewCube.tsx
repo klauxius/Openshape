@@ -52,7 +52,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     const up = camera.up.clone().normalize();
     
     // Check for standard views with a tolerance
-    const tolerance = 0.95; // Dot product tolerance (close to 1.0 means vectors are aligned)
+    const tolerance = 0.98; // Dot product tolerance (close to 1.0 means vectors are aligned)
     
     // Check main axes alignments
     if (Math.abs(forward.x) > tolerance) {
@@ -102,7 +102,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     // Limit update frequency to prevent constant recalculation
     // Only update if the rotation changed significantly
     const currentRotation = { x: rotX, y: rotY, z: rotZ };
-    const threshold = 0.1;
+    const threshold = 0.5;
     
     if (
       Math.abs(currentRotation.x - cameraRotation.x) > threshold ||
@@ -309,7 +309,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
     width: "100%",
     height: "100%",
     position: "relative",
-    transition: "transform 0.05s ease-out",
+    transition: "transform 0.02s linear",
     pointerEvents: "auto", // Re-enable mouse events for the cube
   }
 

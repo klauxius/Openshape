@@ -125,96 +125,126 @@ export default function ViewCube({
       
       // Helper function to set the view based on the face normal
       const setViewFromNormal = (normal) => {
+        // Standard view distance from origin
+        const viewDistance = 20;
+        
         // Determine the most prominent direction of the normal
         let position;
+        let up = new THREE.Vector3(0, 1, 0); // Default up vector
         
         if (Math.abs(normal.x) > Math.abs(normal.y) && Math.abs(normal.x) > Math.abs(normal.z)) {
           // X-axis face was clicked
           if (normal.x > 0) {
             // Right view (X+)
-            position = [15, 0, 0]; // Increased distance for better view
+            position = new THREE.Vector3(viewDistance, 0, 0);
             console.log('Setting Right view');
           } else {
             // Left view (X-)
-            position = [-15, 0, 0]; // Increased distance for better view
+            position = new THREE.Vector3(-viewDistance, 0, 0);
             console.log('Setting Left view');
           }
         } else if (Math.abs(normal.y) > Math.abs(normal.x) && Math.abs(normal.y) > Math.abs(normal.z)) {
           // Y-axis face was clicked
           if (normal.y > 0) {
             // Top view (Y+)
-            position = [0, 15, 0]; // Increased distance for better view
+            position = new THREE.Vector3(0, viewDistance, 0);
+            up = new THREE.Vector3(0, 0, -1); // Adjust up vector for top view
             console.log('Setting Top view');
           } else {
             // Bottom view (Y-)
-            position = [0, -15, 0]; // Increased distance for better view
+            position = new THREE.Vector3(0, -viewDistance, 0);
+            up = new THREE.Vector3(0, 0, 1); // Adjust up vector for bottom view
             console.log('Setting Bottom view');
           }
         } else {
           // Z-axis face was clicked
           if (normal.z > 0) {
             // Front view (Z+)
-            position = [0, 0, 15]; // Increased distance for better view
+            position = new THREE.Vector3(0, 0, viewDistance);
             console.log('Setting Front view');
           } else {
             // Back view (Z-)
-            position = [0, 0, -15]; // Increased distance for better view
+            position = new THREE.Vector3(0, 0, -viewDistance);
             console.log('Setting Back view');
           }
         }
         
-        // Update the camera position
+        // Update the camera position and orientation
         if (position && cameraRef.current && controlsRef.current) {
-          cameraRef.current.position.set(...position);
+          // Set the camera position
+          cameraRef.current.position.copy(position);
+          
+          // Look at the origin
           cameraRef.current.lookAt(0, 0, 0);
+          
+          // Set the up vector to ensure correct orientation
+          cameraRef.current.up.copy(up);
+          
+          // Update the controls to apply changes
           controlsRef.current.update();
         }
       };
       
       // Helper function to add text labels to the cube faces
       function addLabelsToFaces(cube) {
-        const addLabel = (text, position) => {
+        // Define more descriptive labels for each face
+        const labels = {
+          right: 'Right',
+          left: 'Left', 
+          top: 'Top',
+          bottom: 'Bottom',
+          front: 'Front',
+          back: 'Back'
+        };
+        
+        const addLabel = (text, position, rotation = [0, 0, 0]) => {
           // Create canvas for the label
           const canvas = document.createElement('canvas');
-          canvas.width = 64;
-          canvas.height = 64;
+          canvas.width = 96;
+          canvas.height = 96;
           const ctx = canvas.getContext('2d');
+          
+          // Clear canvas
+          ctx.fillStyle = 'rgba(255, 255, 255, 0)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
           
           // Draw text
           ctx.fillStyle = '#000000'; // Keep black for best contrast
-          ctx.font = 'bold 32px Arial';
+          ctx.font = 'bold 20px Arial';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(text, 32, 32);
+          ctx.fillText(text, 48, 48);
           
           // Add an outline to the text for better visibility
           ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 2;
-          ctx.strokeText(text, 32, 32);
+          ctx.lineWidth = 1.5;
+          ctx.strokeText(text, 48, 48);
           
           // Create texture and material
           const texture = new THREE.CanvasTexture(canvas);
+          texture.minFilter = THREE.LinearFilter; // Improves text readability
+          
           const material = new THREE.SpriteMaterial({ 
             map: texture,
             transparent: true,
-            opacity: 1.0  // Increased opacity for better visibility
+            opacity: 1.0
           });
           
           // Create sprite and position it
           const sprite = new THREE.Sprite(material);
-          sprite.scale.set(0.6, 0.6, 0.6);  // Slightly larger for better visibility
+          sprite.scale.set(0.5, 0.5, 0.5);
           sprite.position.set(...position);
           
           cube.add(sprite);
         };
         
-        // Add labels with clearer positioning
-        addLabel('X', [0.7, 0, 0]); // Right
-        addLabel('X', [-0.7, 0, 0]); // Left
-        addLabel('Y', [0, 0.7, 0]); // Top
-        addLabel('Y', [0, -0.7, 0]); // Bottom
-        addLabel('Z', [0, 0, 0.7]); // Front
-        addLabel('Z', [0, 0, -0.7]); // Back
+        // Add face labels with more descriptive text
+        addLabel(labels.right, [0.7, 0, 0]);
+        addLabel(labels.left, [-0.7, 0, 0]);
+        addLabel(labels.top, [0, 0.7, 0]);
+        addLabel(labels.bottom, [0, -0.7, 0]);
+        addLabel(labels.front, [0, 0, 0.7]);
+        addLabel(labels.back, [0, 0, -0.7]);
       }
       
       // Clean up on unmount
@@ -248,6 +278,5 @@ export default function ViewCube({
   }, [cameraRef, controlsRef]);
   
   // This component doesn't render any DOM elements directly
-  // Instead, it adds 3D objects to the existing scene
   return null;
 } 

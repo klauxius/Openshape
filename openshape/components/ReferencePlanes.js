@@ -4,15 +4,15 @@ import * as THREE from 'three';
  * Creates and manages reference planes for CAD applications
  * 
  * This component creates Front, Top, and Right reference planes that are:
- * 1. Semi-transparent with distinct colors
- * 2. Include a grid pattern for better visualization
+ * 1. Semi-transparent with a subtle blue color
+ * 2. Include distinct borders for clear visualization
  * 3. Have labels to identify each plane
  * 4. Support highlighting on hover/selection
  */
 const ReferencePlanes = ({
   scene,
   size = 20,
-  opacity = 0.2,
+  opacity = 0.1, // Reduced opacity for subtler appearance
   gridDivisions = 10,
 }) => {
   // Reference to all plane objects for manipulation
@@ -22,12 +22,9 @@ const ReferencePlanes = ({
     right: null
   };
   
-  // Color scheme for different planes
-  const planeColors = {
-    front: 0x4a90e2, // Blue
-    top: 0x50e3c2,   // Teal/Green
-    right: 0xe84a5f  // Red
-  };
+  // Use a single color scheme for all planes
+  const planeColor = 0xc8e1ff; // Faint blue for all planes
+  const borderColor = 0x4287f5; // Stronger blue for borders
   
   /**
    * Creates and adds reference planes to the scene
@@ -61,9 +58,9 @@ const ReferencePlanes = ({
     // Rotate the plane to align with the given normal
     alignPlaneToNormal(planeGeometry, normal);
     
-    // Create semi-transparent material with the plane's color
+    // Create semi-transparent material with the standard plane color
     const planeMaterial = new THREE.MeshBasicMaterial({
-      color: planeColors[name],
+      color: planeColor,
       transparent: true,
       opacity: opacity,
       side: THREE.DoubleSide,
@@ -74,15 +71,15 @@ const ReferencePlanes = ({
     planeMesh.position.copy(position);
     planeMesh.name = `${name}PlaneMesh`;
     
-    // Add grid lines to the plane
-    const gridHelper = createGridForPlane(name, normal, position);
+    // Add to group
+    planeGroup.add(planeMesh);
+    
+    // Add border to the plane
+    const border = createPlaneBorder(name, normal, position);
+    planeGroup.add(border);
     
     // Add plane label
     const label = createPlaneLabel(name, normal, position);
-    
-    // Add everything to the group
-    planeGroup.add(planeMesh);
-    planeGroup.add(gridHelper);
     planeGroup.add(label);
     
     // Add to scene
@@ -97,6 +94,36 @@ const ReferencePlanes = ({
     planeMesh.userData.planeName = name;
     
     return planeGroup;
+  };
+  
+  /**
+   * Creates a border for the plane
+   */
+  const createPlaneBorder = (name, normal, position) => {
+    // Create a wireframe border using line segments
+    const borderGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(size, size));
+    const borderMaterial = new THREE.LineBasicMaterial({ 
+      color: borderColor, 
+      linewidth: 2 
+    });
+    
+    const border = new THREE.LineSegments(borderGeometry, borderMaterial);
+    border.name = `${name}PlaneBorder`;
+    
+    // Align the border with the plane
+    alignPlaneToNormal(border.geometry, normal);
+    border.position.copy(position);
+    
+    // Add a small offset to avoid z-fighting
+    if (normal.equals(new THREE.Vector3(0, 0, 1))) {
+      border.position.z += 0.01;
+    } else if (normal.equals(new THREE.Vector3(0, 1, 0))) {
+      border.position.y += 0.01;
+    } else if (normal.equals(new THREE.Vector3(1, 0, 0))) {
+      border.position.x += 0.01;
+    }
+    
+    return border;
   };
   
   /**
@@ -115,39 +142,6 @@ const ReferencePlanes = ({
   };
   
   /**
-   * Creates a grid to overlay on the plane
-   */
-  const createGridForPlane = (name, normal, position) => {
-    // Create a grid helper appropriate for the plane orientation
-    let gridHelper;
-    
-    if (normal.equals(new THREE.Vector3(0, 1, 0))) {
-      // Top plane - XZ grid
-      gridHelper = new THREE.GridHelper(size, gridDivisions);
-      gridHelper.position.set(0, 0.01, 0); // Slight offset to avoid Z-fighting
-    } 
-    else if (normal.equals(new THREE.Vector3(1, 0, 0))) {
-      // Right plane - YZ grid
-      gridHelper = new THREE.GridHelper(size, gridDivisions);
-      gridHelper.rotation.z = Math.PI / 2;
-      gridHelper.position.set(0.01, 0, 0); // Slight offset
-    }
-    else {
-      // Front plane - XY grid
-      gridHelper = new THREE.GridHelper(size, gridDivisions);
-      gridHelper.rotation.x = Math.PI / 2;
-      gridHelper.position.set(0, 0, 0.01); // Slight offset
-    }
-    
-    // Use the plane color for grid lines
-    gridHelper.material.color.set(new THREE.Color(planeColors[name]));
-    gridHelper.material.opacity = 0.6;
-    gridHelper.material.transparent = true;
-    
-    return gridHelper;
-  };
-  
-  /**
    * Creates a text label for the plane
    */
   const createPlaneLabel = (name, normal, position) => {
@@ -163,7 +157,7 @@ const ReferencePlanes = ({
     
     // Draw text
     context.font = 'Bold 60px Arial';
-    context.fillStyle = new THREE.Color(planeColors[name]).getStyle();
+    context.fillStyle = new THREE.Color(borderColor).getStyle(); // Use border color for text
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillText(name.charAt(0).toUpperCase() + name.slice(1), 128, 128);
@@ -173,13 +167,13 @@ const ReferencePlanes = ({
     const spriteMaterial = new THREE.SpriteMaterial({
       map: texture,
       transparent: true,
-      opacity: 1.0
+      opacity: 0.9 // Make label slightly more visible
     });
     
     const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.scale.set(5, 5, 1);
+    sprite.scale.set(4, 4, 1); // Smaller scale for less dominance
     
-    // Position the label
+    // Position the label in the corner of each plane
     if (name === 'front') {
       sprite.position.set(size/2 - 2, size/2 - 2, 0.1);
     } else if (name === 'top') {
@@ -208,7 +202,7 @@ const ReferencePlanes = ({
           planeMesh.userData.originalOpacity = planeMesh.material.opacity;
         }
         // Increase opacity for highlighting
-        planeMesh.material.opacity = Math.min(opacity * 2, 0.6);
+        planeMesh.material.opacity = Math.min(opacity * 3, 0.3);
       } else {
         // Restore original opacity
         planeMesh.material.opacity = 

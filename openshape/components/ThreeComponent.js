@@ -24,10 +24,10 @@ export default function ThreeComponent() {
     camera.position.z = 5
     
     // Create a cube
-    const geometry = new THREE.BoxGeometry(2, 2, 2)
-    const material = new THREE.MeshBasicMaterial({ color: 0x0088ff, wireframe: false })
-    const cube = new THREE.Mesh(geometry, material)
-    scene.add(cube)
+    //const geometry = new THREE.BoxGeometry(2, 2, 2)
+    //const material = new THREE.MeshBasicMaterial({ color: 0x0088ff, wireframe: false })
+    //const cube = new THREE.Mesh(geometry, material)
+    //scene.add(cube)
     
     // Add some lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)

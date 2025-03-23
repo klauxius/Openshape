@@ -38,56 +38,59 @@ class SketchManager {
     const halfSize = planeSize / 2;
     
     // Generate different geometries based on plane
-    let planeGeometry;
+    let planePolygon;
     
     // Define planes for each standard orientation
     switch (planeInfo.plane) {
       case 'yz':
         // YZ plane (looking towards positive X)
-        planeGeometry = jscad.primitives.polygon({
+        planePolygon = {
           points: [
             [0, -halfSize, -halfSize],  // bottom-left
             [0, halfSize, -halfSize],   // top-left
             [0, halfSize, halfSize],    // top-right
             [0, -halfSize, halfSize]    // bottom-right
           ]
-        });
+        };
         break;
       case 'xz':
         // XZ plane (looking towards positive Y)
-        planeGeometry = jscad.primitives.polygon({
+        planePolygon = {
           points: [
             [-halfSize, 0, -halfSize],  // bottom-left
             [halfSize, 0, -halfSize],   // bottom-right
             [halfSize, 0, halfSize],    // top-right
             [-halfSize, 0, halfSize]    // top-left
           ]
-        });
+        };
         break;
       case 'custom':
         // For custom planes, we'll use XY plane with an offset along Z
-        planeGeometry = jscad.primitives.polygon({
+        planePolygon = {
           points: [
             [-halfSize, -halfSize, planeInfo.offset],
             [halfSize, -halfSize, planeInfo.offset],
             [halfSize, halfSize, planeInfo.offset],
             [-halfSize, halfSize, planeInfo.offset]
           ]
-        });
+        };
         break;
       case 'xy':
       default:
         // XY plane (looking towards positive Z)
-        planeGeometry = jscad.primitives.polygon({
+        planePolygon = {
           points: [
             [-halfSize, -halfSize, 0],
             [halfSize, -halfSize, 0],
             [halfSize, halfSize, 0],
             [-halfSize, halfSize, 0]
           ]
-        });
+        };
         break;
     }
+    
+    // First create a proper JSCAD polygon from our points
+    const planeGeometry = jscad.primitives.polygon(planePolygon);
     
     // Create a thin extrusion to visualize the sketch plane
     const planeVisualization = jscad.extrusions.extrudeLinear({ 
@@ -315,7 +318,26 @@ class SketchManager {
     // First get the 2D points from the geometry
     // Assuming the geometry is a 2D shape in the XY plane
     const points2D = geometry.points || [];
-    const halfSize = 50 / 2; // Match the same size as the sketch plane
+    
+    if (points2D.length < 3) {
+      console.warn('Geometry has fewer than 3 points - cannot create a proper polygon');
+      // Ensure we have at least 3 points for a polygon
+      if (points2D.length === 2) {
+        // If we have 2 points (like a line), add a third point to form a triangle
+        const pt1 = points2D[0];
+        const pt2 = points2D[1];
+        // Create a point that forms a right angle with the line
+        const dx = pt2[0] - pt1[0];
+        const dy = pt2[1] - pt1[1];
+        // Perpendicular vector
+        const perpX = -dy * 0.1; // Small offset
+        const perpY = dx * 0.1;  // Small offset
+        points2D.push([pt1[0] + perpX, pt1[1] + perpY]);
+      } else if (points2D.length < 2) {
+        // If we have 0 or 1 points, we can't create a proper polygon
+        return null;
+      }
+    }
     
     // Map 2D points to 3D points based on the sketch plane
     let points3D = [];
@@ -340,8 +362,14 @@ class SketchManager {
         break;
     }
     
-    // Create a new polygon with the 3D points
-    return jscad.primitives.polygon({ points: points3D });
+    // Create a polygon object with the 3D points
+    try {
+      return jscad.primitives.polygon({ points: points3D });
+    } catch (error) {
+      console.error('Error creating polygon:', error);
+      console.error('Points:', points3D);
+      return null;
+    }
   }
   
   /**

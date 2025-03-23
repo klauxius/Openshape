@@ -321,137 +321,8 @@ function JscadThreeScene() {
         // Set planes visibility based on state
         referencePlanesRef.current.toggleAllPlanesVisibility(showPlanes);
         
-        // Create geometry based on model type
-        let jscadGeometry;
-        
-        if (modelType === 'cube') {
-          // Create a simple cube
-          jscadGeometry = cube({ size: 5 });
-        } 
-        else if (modelType === 'cylinder') {
-          // Create a cylinder
-          jscadGeometry = cylinder({ radius: 2, height: 6 });
-        }
-        else if (modelType === 'complex') {
-          // Create a more complex shape - cylinder with a cube hole
-          const mainCylinder = cylinder({ radius: 4, height: 6 });
-          
-          // For the hole, create a simple cube that definitely has a positive size
-          // Then scale and translate it to the desired position
-          const baseCube = cube({ size: 1 }); // Using 1 as a safe positive value
-          
-          // Scale the cube to create the desired hole shape (wider than the cylinder)
-          const scaledCube = scale([3, 3, 10], baseCube);
-          
-          // Subtract the cube from the cylinder to create a hole
-          jscadGeometry = subtract(mainCylinder, scaledCube);
-        }
-        else if (modelType === 'fixed-complex') {
-          // Create a more complex shape - cylinder with a rectangular hole
-          const mainCylinder = cylinder({ radius: 3.5, height: 5 });
-          
-          // Create a rectangular hole by starting with a simple cube
-          const baseCube = cube({ size: 1 }); // Start with a single unit cube
-          
-          // Scale it to make a rectangular prism (longer than the cylinder diameter)
-          const scaledCube = scale([2, 2, 8], baseCube);
-          
-          // Position the rectangular prism to clearly cut through the cylinder
-          // Offset it slightly from the center to make the hole more visible
-          const positionedCube = translate([1, 0, 0], scaledCube);
-          
-          // Subtract the cube from the cylinder to create a rectangular hole
-          jscadGeometry = subtract(mainCylinder, positionedCube);
-        }
-        else if (modelType === 'union') {
-          // Create a union of shapes
-          const baseCube = translate([0, 0, 0], cube({ size: 4 }));
-          const topSphere = translate([0, 0, 3], sphere({ radius: 2, segments: 32 }));
-          jscadGeometry = union(baseCube, topSphere);
-        }
-        else if (modelType === 'extrusion') {
-          // Create an extruded shape
-          const shape = rectangle({ size: [5, 5] });
-          jscadGeometry = extrudeLinear({ height: 3 }, shape);
-        }
-        else if (modelType === 'rotated') {
-          // Create a rotated cube
-          const baseCube = cube({ size: 4 });
-          jscadGeometry = rotate([Math.PI/4, Math.PI/4, 0], baseCube);
-        }
-        else if (modelType === 'advanced') {
-          // Advanced CSG example with multiple operations
-          
-          // Base shape - a cylinder
-          const base = cylinder({ radius: 4, height: 2 });
-          
-          // Create some holes - three cylinders positioned in a triangle
-          const holeRadius = 1;
-          const holeDistance = 2;
-          const hole1 = translate([holeDistance, 0, 0], 
-                       cylinder({ radius: holeRadius, height: 5 }));
-          const hole2 = translate([-holeDistance/2, holeDistance*0.866, 0], 
-                       cylinder({ radius: holeRadius, height: 5 }));
-          const hole3 = translate([-holeDistance/2, -holeDistance*0.866, 0], 
-                       cylinder({ radius: holeRadius, height: 5 }));
-          
-          // Create a central cutout
-          const centralCutout = translate([0, 0, 1],
-                              cylinder({ radius: 2, height: 1 }));
-          
-          // Add some details on top
-          const topDetail = translate([0, 0, 1],
-                           cylinder({ radius: 1.5, height: 0.5 }));
-          
-          // Create small spheres to place at the corners
-          const sphere1 = translate([holeDistance, 0, 0], 
-                        sphere({ radius: 0.7, segments: 16 }));
-          const sphere2 = translate([-holeDistance/2, holeDistance*0.866, 0], 
-                        sphere({ radius: 0.7, segments: 16 }));
-          const sphere3 = translate([-holeDistance/2, -holeDistance*0.866, 0], 
-                        sphere({ radius: 0.7, segments: 16 }));
-          
-          // Combine everything using boolean operations
-          // 1. Subtract the holes and central cutout from the base
-          const baseWithHoles = subtract(
-            base,
-            hole1, hole2, hole3,
-            centralCutout
-          );
-          
-          // 2. Union the base with the top detail and decorative spheres
-          jscadGeometry = union(
-            baseWithHoles,
-            topDetail,
-            sphere1, sphere2, sphere3
-          );
-        }
-        else {
-          // Default to sphere
-          jscadGeometry = sphere({ radius: 3, segments: 32 });
-        }
-        
         // Store the current geometry for export functionality
-        setCurrentGeometry(jscadGeometry);
-        
-        // Colorize the geometry with greyish-blue color
-        // [R, G, B] values from 0-1, creating a professional greyish-blue tone
-        const colorized = colorize([0.4, 0.5, 0.6], jscadGeometry);
-        
-        // Convert JSCAD geometry to Three.js geometry
-        const threeGeometry = jscadToThreeGeometry(colorized);
-        
-        // Create material with matching greyish-blue color
-        const material = new THREE.MeshStandardMaterial({
-          color: 0x6682a0,  // Hexadecimal equivalent of greyish-blue
-          metalness: 0.2,
-          roughness: 0.4,
-          side: THREE.DoubleSide
-        });
-        
-        // Create mesh and add to scene
-        const mesh = new THREE.Mesh(threeGeometry, material);
-        scene.add(mesh);
+        setCurrentGeometry(null);
         
         // Configure touch controls
         controls.touches = {
@@ -557,10 +428,14 @@ function JscadThreeScene() {
             
             if (controls) controls.dispose();
             
-            if (mesh) {
-              if (mesh.geometry) mesh.geometry.dispose();
-              if (mesh.material) mesh.material.dispose();
-            }
+            // Clean up any meshes created from MCP models
+            Object.values(meshesRef.current).forEach(mesh => {
+              if (mesh) {
+                if (mesh.geometry) mesh.geometry.dispose();
+                if (mesh.material) mesh.material.dispose();
+                scene.remove(mesh);
+              }
+            });
             
             if (renderer) {
               if (mountRef.current) {

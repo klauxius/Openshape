@@ -35,6 +35,13 @@ import {
 } from "lucide-react"
 import { useUnits } from '../contexts/UnitContext'
 import initializeTools from '../lib/mcpTools';
+import partsLibrary from '../lib/partsLibrary';
+import UserGuide from '../components/UserGuide'
+import ImportModelDialog from '../components/ImportModelDialog'
+import ExportModelDialog from '../components/ExportModelDialog'
+import SketchButton from '../components/SketchButton'
+import PlaneSelectionDialog from '../components/PlaneSelectionDialog'
+import sketchManager from '../lib/sketchManager'
 
 // Placeholder component for JscadThreeViewer
 const PlaceholderViewer = () => {
@@ -74,6 +81,11 @@ const AICadAssistant = dynamic(() => import('../components/AICadAssistant'), {
   ssr: false,
 })
 
+// Import the Sketch Toolbar component
+const SketchToolbar = dynamic(() => import('../components/SketchToolbar'), {
+  ssr: false,
+})
+
 export default function CadInterface() {
   const [mounted, setMounted] = useState(false)
   const [expandedFeatures, setExpandedFeatures] = useState(true)
@@ -88,9 +100,14 @@ export default function CadInterface() {
   const [projectName, setProjectName] = useState("New Project")
   const [isEditingName, setIsEditingName] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false)
+  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(true)
   const projectNameInputRef = useRef(null)
   const { unitSystem, format } = useUnits()
+  const [showPlaneSelectionDialog, setShowPlaneSelectionDialog] = useState(false)
+  const [isInSketchMode, setIsInSketchMode] = useState(false)
+  const [showPartDialog, setShowPartDialog] = useState(false);
+  const [selectedPartType, setSelectedPartType] = useState(null);
+  const [partParameters, setPartParameters] = useState({});
 
   // Fake data for the UI mockup
   const featureItems = [
@@ -238,11 +255,104 @@ export default function CadInterface() {
     setIsAIAssistantOpen(!isAIAssistantOpen)
   }
 
+  const handleCreateSketch = () => {
+    setShowPlaneSelectionDialog(true)
+  }
+
+  const handlePlaneSelected = (planeInfo) => {
+    setShowPlaneSelectionDialog(false)
+    
+    try {
+      // Create a new sketch on the selected plane
+      const sketch = sketchManager.createSketch(planeInfo)
+      console.log('Sketch created:', sketch)
+      
+      // Update UI to reflect sketch mode
+      setIsInSketchMode(true)
+    } catch (error) {
+      console.error('Failed to create sketch:', error)
+      alert(`Failed to create sketch: ${error.message}`)
+    }
+  }
+
+  const handleExitSketchMode = () => {
+    setIsInSketchMode(false)
+  }
+
+  const handleSketchExtrude = (modelId) => {
+    console.log('Sketch extruded, model created:', modelId)
+    setIsInSketchMode(false)
+  }
+
+  const handlePartClick = (partType) => {
+    setSelectedPartType(partType);
+    
+    // Set default parameters based on part type
+    let defaultParams = {};
+    switch(partType) {
+      case 'cube':
+        defaultParams = { width: 10, height: 10, depth: 10 };
+        break;
+      case 'sphere':
+        defaultParams = { radius: 5 };
+        break;
+      case 'cylinder':
+        defaultParams = { radius: 5, height: 10 };
+        break;
+      case 'torus':
+        defaultParams = { innerRadius: 2, outerRadius: 5 };
+        break;
+      default:
+        defaultParams = {};
+    }
+    
+    setPartParameters(defaultParams);
+    setShowPartDialog(true);
+  };
+
+  const handleInsertPart = () => {
+    if (!selectedPartType) return;
+    
+    // Insert the part using the parts library
+    const result = partsLibrary.insertStandardPart(selectedPartType, partParameters);
+    
+    if (result.success) {
+      console.log('Part inserted successfully:', result.message);
+      // Optionally set the newly created part as active
+      setActiveModel(result.model);
+    } else {
+      console.error('Failed to insert part:', result.error);
+      alert(`Failed to insert part: ${result.error}`);
+    }
+    
+    // Close the dialog
+    setShowPartDialog(false);
+  };
+
+  const handlePartParameterChange = (param, value) => {
+    setPartParameters(prev => ({
+      ...prev,
+      [param]: parseFloat(value) || 0
+    }));
+  };
+
   useEffect(() => {
     setMounted(true)
     
     // Initialize MCP tools when the component mounts
     initializeTools();
+
+    // Add effect to listen for sketch mode changes
+    const handleSketchModeChanged = (event) => {
+      const { active } = event.detail
+      setIsInSketchMode(active)
+    }
+    
+    window.addEventListener('openshape:sketchModeChanged', handleSketchModeChanged)
+    
+    return () => {
+      window.removeEventListener('openshape:sketchModeChanged', handleSketchModeChanged)
+    }
   }, [])
 
   if (!mounted) {
@@ -382,6 +492,13 @@ export default function CadInterface() {
                 </button>
               ))}
             </div>
+
+            {/* Create Sketch Button - only show when Sketch tab is active */}
+            {(activeTab === "sketch" && !isInSketchMode) && (
+              <div className="flex items-center pr-3 mr-3 border-r border-gray-200">
+                <SketchButton onClick={handleCreateSketch} className="mx-1" />
+              </div>
+            )}
 
             {/* Active tab tools */}
             <div className="flex items-center pr-3 mr-3 border-r border-gray-200">
@@ -531,8 +648,56 @@ export default function CadInterface() {
                     
                     {expandedParts && (
                       <div className="ml-5 mt-1 space-y-1">
-                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
+                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer">
                           <span>Default</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Parts Library Section */}
+                  <div>
+                    <div 
+                      className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
+                      onClick={() => setExpandedDefaultGeometry(!expandedDefaultGeometry)}
+                    >
+                      {expandedDefaultGeometry ? (
+                        <ChevronDown size={16} className="text-gray-500 mr-1" />
+                      ) : (
+                        <ChevronRight size={16} className="text-gray-500 mr-1" />
+                      )}
+                      <span className="font-medium text-sm">Parts Library</span>
+                    </div>
+                    
+                    {expandedDefaultGeometry && (
+                      <div className="ml-5 mt-1 space-y-1">
+                        <div 
+                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+                          onClick={() => handlePartClick('cube')}
+                        >
+                          <Box size={14} className="mr-1 text-gray-500" />
+                          <span>Cube</span>
+                        </div>
+                        <div 
+                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+                          onClick={() => handlePartClick('sphere')}
+                        >
+                          <Circle size={14} className="mr-1 text-gray-500" />
+                          <span>Sphere</span>
+                        </div>
+                        <div 
+                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+                          onClick={() => handlePartClick('cylinder')}
+                        >
+                          <div className="w-3.5 h-3.5 rounded-sm border border-gray-500 mr-1.5"></div>
+                          <span>Cylinder</span>
+                        </div>
+                        <div 
+                          className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded cursor-pointer"
+                          onClick={() => handlePartClick('torus')}
+                        >
+                          <Hexagon size={14} className="mr-1 text-gray-500" />
+                          <span>Torus</span>
                         </div>
                       </div>
                     )}
@@ -547,6 +712,14 @@ export default function CadInterface() {
             <JscadThreeViewer 
               onModelChange={setActiveModel}
             />
+
+            {/* Sketch Toolbar - only shown in sketch mode */}
+            {isInSketchMode && (
+              <SketchToolbar 
+                onExit={handleExitSketchMode}
+                onExtrude={handleSketchExtrude}
+              />
+            )}
 
             {/* AI Assistant */}
             <AICadAssistant
@@ -577,27 +750,147 @@ export default function CadInterface() {
 
       {/* Modals and dialogs */}
       {showGuide && (
-        <div className="fixed inset-0" onClick={toggleUserGuide}>
-          <div className="absolute inset-0 bg-black bg-opacity-40"></div>
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-            <div className="bg-white p-6 rounded-lg shadow-lg max-w-2xl">
-              <h2 className="text-xl font-bold mb-4">OpenShape CAD User Guide</h2>
-              <p className="mb-2">
-                Use this interface to create and edit 3D models for your CAD projects.
-              </p>
+        <UserGuide isOpen={showGuide} onClose={toggleUserGuide} />
+      )}
+      
+      <ImportModelDialog 
+        isOpen={showImportDialog} 
+        onClose={() => setShowImportDialog(false)}
+        onModelImported={handleModelImported}
+      />
+      
+      <ExportModelDialog 
+        isOpen={showExportDialog} 
+        onClose={() => setShowExportDialog(false)} 
+        geometry={activeModel ? activeModel.geometry : null}
+      />
+      
+      {/* Plane Selection Dialog */}
+      <PlaneSelectionDialog
+        isOpen={showPlaneSelectionDialog}
+        onClose={() => setShowPlaneSelectionDialog(false)}
+        onPlaneSelected={handlePlaneSelected}
+      />
+
+      {/* Part Parameters Dialog */}
+      {showPartDialog && (
+        <div className="fixed inset-0 z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">
+              Insert {selectedPartType && selectedPartType.charAt(0).toUpperCase() + selectedPartType.slice(1)}
+            </h2>
+            
+            <div className="space-y-4">
+              {selectedPartType === 'cube' && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Width</label>
+                      <input
+                        type="number"
+                        value={partParameters.width || ''}
+                        onChange={(e) => handlePartParameterChange('width', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Height</label>
+                      <input
+                        type="number"
+                        value={partParameters.height || ''}
+                        onChange={(e) => handlePartParameterChange('height', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Depth</label>
+                    <input
+                      type="number"
+                      value={partParameters.depth || ''}
+                      onChange={(e) => handlePartParameterChange('depth', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                </>
+              )}
+              
+              {selectedPartType === 'sphere' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Radius</label>
+                  <input
+                    type="number"
+                    value={partParameters.radius || ''}
+                    onChange={(e) => handlePartParameterChange('radius', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+              )}
+              
+              {selectedPartType === 'cylinder' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Radius</label>
+                    <input
+                      type="number"
+                      value={partParameters.radius || ''}
+                      onChange={(e) => handlePartParameterChange('radius', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Height</label>
+                    <input
+                      type="number"
+                      value={partParameters.height || ''}
+                      onChange={(e) => handlePartParameterChange('height', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                </>
+              )}
+              
+              {selectedPartType === 'torus' && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Inner Radius</label>
+                    <input
+                      type="number"
+                      value={partParameters.innerRadius || ''}
+                      onChange={(e) => handlePartParameterChange('innerRadius', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Outer Radius</label>
+                    <input
+                      type="number"
+                      value={partParameters.outerRadius || ''}
+                      onChange={(e) => handlePartParameterChange('outerRadius', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            
+            <div className="mt-6 flex justify-end space-x-3">
               <button
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none"
-                onClick={toggleUserGuide}
+                className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-100"
+                onClick={() => setShowPartDialog(false)}
               >
-                Close
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                onClick={handleInsertPart}
+              >
+                Insert
               </button>
             </div>
           </div>
         </div>
       )}
-      
-      {/* Import/Export Dialogs */}
-      <div id="modal-container"></div>
     </>
   )
 }

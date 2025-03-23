@@ -4,6 +4,9 @@ import styles from '../styles/AICadAssistant.module.css';
 import mcpClient from '../lib/mcpClient';
 
 const AICadAssistant = ({ isOpen, onToggle }) => {
+  // Add console log to verify component is rendering
+  console.log('AICadAssistant rendering, isOpen:', isOpen);
+  
   const [messages, setMessages] = useState([
     { 
       id: 1, 
@@ -43,7 +46,7 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
           { 
             id: Date.now(), 
             role: 'system', 
-            content: `Executing tool: ${toolCall.name}...`
+            content: `Executing tool: ${toolCall.name} with parameters: ${JSON.stringify(toolCall.parameters)}`
           }
         ]);
         
@@ -51,16 +54,26 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
         const result = await mcpClient.executeToolCall(toolCall);
         
         // Add the result as a system message
-        setMessages(prev => [
-          ...prev, 
-          { 
-            id: Date.now() + 1, 
-            role: 'system', 
-            content: result.error 
-              ? `Error: ${result.error}` 
-              : `Tool executed successfully: ${JSON.stringify(result.result)}`
-          }
-        ]);
+        if (result.error) {
+          setMessages(prev => [
+            ...prev, 
+            { 
+              id: Date.now() + 1, 
+              role: 'system', 
+              content: `Error: ${result.error}`
+            }
+          ]);
+        } else {
+          const successMessage = result.result?.message || 'Tool executed successfully';
+          setMessages(prev => [
+            ...prev, 
+            { 
+              id: Date.now() + 1, 
+              role: 'system', 
+              content: successMessage
+            }
+          ]);
+        }
       } catch (error) {
         console.error('Error executing tool call:', error);
         setMessages(prev => [
@@ -78,38 +91,38 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
   const handleSendMessage = async () => {
     if (!input.trim()) return;
     
-    // Add user message
-    const userMessage = { id: Date.now(), role: 'user', content: input };
+    // Add user message to chat
+    const userMessage = { 
+      id: Date.now(), 
+      role: 'user', 
+      content: input.trim() 
+    };
+    
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsTyping(true);
     
     try {
-      // Get all previous messages for context (excluding system messages)
-      const conversationHistory = messages
-        .filter(msg => msg.role !== 'system')
-        .map(msg => ({ role: msg.role, content: msg.content }));
+      // Send message to MCP client and get response
+      const response = await mcpClient.sendMessage(userMessage.content, messages);
       
-      // Send the message to the MCP client
-      const response = await mcpClient.sendMessage(input, conversationHistory);
-      
-      // Add the assistant's response
+      // Add assistant's response to chat
       setMessages(prev => [...prev, { 
-        id: Date.now() + 1, 
+        id: Date.now(), 
         role: 'assistant', 
-        content: response.content
+        content: response.content || 'I processed your request.'
       }]);
       
-      // Process any tool calls
+      // Execute any tool calls
       if (response.toolCalls && response.toolCalls.length > 0) {
         await handleToolCalls(response.toolCalls);
       }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error processing message:', error);
       setMessages(prev => [...prev, { 
-        id: Date.now() + 1, 
-        role: 'assistant', 
-        content: 'Sorry, I encountered an error while processing your request.'
+        id: Date.now(), 
+        role: 'system', 
+        content: `Error processing your request: ${error.message}`
       }]);
     } finally {
       setIsTyping(false);
@@ -124,81 +137,78 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
   };
 
   const toggleMinimize = () => {
-    setIsMinimized(!isMinimized);
+    setIsMinimized(prev => !prev);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className={`${styles.assistantContainer} ${isMinimized ? styles.minimized : ''}`}>
+    <div 
+      className={`${styles.assistantContainer} ${isMinimized ? styles.minimized : ''}`}
+    >
+      {/* Header */}
       <div className={styles.header}>
-        <div className={styles.title}>CAD Assistant</div>
+        <div className={styles.title}>AI CAD Assistant</div>
         <div className={styles.controls}>
-          {isMinimized ? (
-            <button onClick={toggleMinimize} className={styles.controlButton}>
-              <Maximize2 size={16} />
-            </button>
-          ) : (
-            <button onClick={toggleMinimize} className={styles.controlButton}>
-              <Minimize2 size={16} />
-            </button>
-          )}
-          <button onClick={onToggle} className={styles.controlButton}>
+          <button className={styles.controlButton} onClick={toggleMinimize}>
+            {isMinimized ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+          </button>
+          <button className={styles.controlButton} onClick={onToggle}>
             <X size={16} />
           </button>
         </div>
       </div>
       
+      {/* Message area */}
       {!isMinimized && (
-        <>
-          <div className={styles.messagesContainer}>
-            {messages.map((message) => (
-              <div 
-                key={message.id} 
-                className={`${styles.message} ${
-                  message.role === 'user' 
-                    ? styles.userMessage 
-                    : message.role === 'system' 
-                      ? styles.systemMessage 
-                      : styles.assistantMessage
-                }`}
-              >
-                <div className={styles.messageContent}>
-                  {message.content}
-                </div>
-              </div>
-            ))}
-            {isTyping && (
-              <div className={`${styles.message} ${styles.assistantMessage}`}>
-                <div className={styles.typingIndicator}>
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-          
-          <div className={styles.inputContainer}>
-            <textarea
-              ref={inputRef}
-              className={styles.input}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask me about modeling or tasks..."
-              rows={1}
-            />
-            <button 
-              onClick={handleSendMessage} 
-              className={styles.sendButton}
-              disabled={!input.trim()}
+        <div className={styles.messagesContainer}>
+          {messages.map(message => (
+            <div 
+              key={message.id} 
+              className={`${
+                message.role === 'user' 
+                  ? styles.userMessage 
+                  : message.role === 'assistant' 
+                    ? styles.assistantMessage 
+                    : styles.systemMessage
+              }`}
             >
-              <Send size={18} />
-            </button>
-          </div>
-        </>
+              {message.content}
+            </div>
+          ))}
+          {isTyping && (
+            <div className={styles.assistantMessage}>
+              <div className={styles.typingIndicator}>
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
+      
+      {/* Input area */}
+      {!isMinimized && (
+        <div className={styles.inputContainer}>
+          <textarea 
+            ref={inputRef}
+            className={styles.input}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask me to create or modify 3D models..."
+            rows={1}
+          />
+          <button 
+            className={styles.sendButton} 
+            onClick={handleSendMessage}
+            disabled={!input.trim() || isTyping}
+          >
+            <Send size={18} />
+          </button>
+        </div>
       )}
     </div>
   );

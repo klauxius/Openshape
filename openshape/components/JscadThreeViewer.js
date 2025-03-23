@@ -135,6 +135,90 @@ function JscadThreeScene() {
   // Store references to Three.js objects for view controls
   const sceneRef = useRef(null);
   const cameraRef = useRef(null);
+  
+  // Store MCP models
+  const [mcpModels, setMcpModels] = useState({});
+  const meshesRef = useRef({});
+
+  // Add a separate useEffect to handle MCP model change events
+  useEffect(() => {
+    // Handler for MCP model change events
+    const handleMcpModelChange = (event) => {
+      const modelData = event.detail?.model;
+      
+      if (!modelData) return;
+      
+      console.log('MCP model change received:', modelData);
+      
+      if (modelData.deleted) {
+        // Handle model deletion
+        setMcpModels(prev => {
+          const newModels = { ...prev };
+          delete newModels[modelData.id];
+          return newModels;
+        });
+        
+        // Remove mesh from scene if it exists
+        if (meshesRef.current[modelData.id] && sceneRef.current) {
+          sceneRef.current.remove(meshesRef.current[modelData.id]);
+          delete meshesRef.current[modelData.id];
+        }
+        
+        return;
+      }
+      
+      // Update models state
+      setMcpModels(prev => ({
+        ...prev,
+        [modelData.id]: modelData
+      }));
+      
+      // If we have a scene, update the visual representation
+      if (sceneRef.current && modelData.geometry) {
+        try {
+          // If we already have a mesh for this model, remove it
+          if (meshesRef.current[modelData.id]) {
+            sceneRef.current.remove(meshesRef.current[modelData.id]);
+          }
+          
+          // Convert JSCAD geometry to Three.js geometry
+          const threeGeometry = jscadToThreeGeometry(modelData.geometry);
+          
+          // Create material (different color for each model for distinction)
+          const modelIndex = Object.keys(mcpModels).length;
+          const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
+          const material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+            metalness: 0.2,
+            roughness: 0.5,
+          });
+          
+          // Create mesh
+          const mesh = new THREE.Mesh(threeGeometry, material);
+          
+          // Add to scene
+          sceneRef.current.add(mesh);
+          
+          // Store reference to mesh
+          meshesRef.current[modelData.id] = mesh;
+        } catch (error) {
+          console.error('Error updating MCP model visualization:', error);
+        }
+      }
+    };
+    
+    // Add event listener
+    if (typeof window !== 'undefined') {
+      window.addEventListener('openshape:modelChanged', handleMcpModelChange);
+    }
+    
+    // Cleanup event listener
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('openshape:modelChanged', handleMcpModelChange);
+      }
+    };
+  }, [mcpModels]);
 
   useEffect(() => {
     // Early return if the ref isn't set yet

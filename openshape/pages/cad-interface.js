@@ -26,6 +26,11 @@ import {
   ZoomIn,
   ZoomOut,
   Move,
+  PanelLeft,
+  Edit3,
+  Menu,
+  X,
+  Ruler,
 } from "lucide-react"
 import { useUnits } from '../contexts/UnitContext'
 
@@ -65,7 +70,7 @@ const JscadThreeViewer = dynamic(() => import('../components/JscadThreeViewer'),
 export default function CadInterface() {
   const [mounted, setMounted] = useState(false)
   const [expandedFeatures, setExpandedFeatures] = useState(true)
-  const [expandedParts, setExpandedParts] = useState(false)
+  const [expandedParts, setExpandedParts] = useState(true)
   const [expandedDefaultGeometry, setExpandedDefaultGeometry] = useState(true)
   const [activeTab, setActiveTab] = useState("sketch")
   const [viewMode, setViewMode] = useState("shaded")
@@ -73,10 +78,11 @@ export default function CadInterface() {
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [activeModel, setActiveModel] = useState(null)
-  const [projectName, setProjectName] = useState("Untitled Model")
+  const [projectName, setProjectName] = useState("New Project")
   const [isEditingName, setIsEditingName] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const projectNameInputRef = useRef(null)
-  const { unitSystem } = useUnits()
+  const { unitSystem, format } = useUnits()
 
   // Fake data for the UI mockup
   const featureItems = [
@@ -184,12 +190,22 @@ export default function CadInterface() {
     setActiveModel(model)
   }
 
-  const handleProjectNameDoubleClick = () => {
+  const handleProjectNameClick = () => {
     setIsEditingName(true)
+    setTimeout(() => {
+      if (projectNameInputRef.current) {
+        projectNameInputRef.current.focus()
+        projectNameInputRef.current.select()
+      }
+    }, 0)
   }
 
   const handleProjectNameChange = (e) => {
     setProjectName(e.target.value)
+  }
+
+  const handleProjectNameBlur = () => {
+    setIsEditingName(false)
   }
 
   const handleProjectNameKeyDown = (e) => {
@@ -198,16 +214,17 @@ export default function CadInterface() {
     }
   }
 
-  const handleProjectNameBlur = () => {
-    setIsEditingName(false)
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen)
   }
 
-  useEffect(() => {
-    if (isEditingName && projectNameInputRef.current) {
-      projectNameInputRef.current.focus()
-      projectNameInputRef.current.select()
-    }
-  }, [isEditingName])
+  const toggleFeatures = () => {
+    setExpandedFeatures(!expandedFeatures)
+  }
+
+  const toggleParts = () => {
+    setExpandedParts(!expandedParts)
+  }
 
   useEffect(() => {
     setMounted(true)
@@ -275,7 +292,7 @@ export default function CadInterface() {
             ) : (
               <span 
                 className="font-medium text-gray-800 px-1 py-0.5 hover:bg-gray-100 rounded cursor-pointer" 
-                onDoubleClick={handleProjectNameDoubleClick}
+                onDoubleClick={handleProjectNameClick}
                 title="Double-click to edit"
               >
                 {projectName}
@@ -439,118 +456,69 @@ export default function CadInterface() {
         {/* Main content area */}
         <div className="flex flex-1 overflow-hidden">
           {/* Feature tree sidebar */}
-          <div className="flex flex-col w-64 border-r border-gray-200 bg-gray-50 overflow-y-auto">
-            <div className="flex items-center p-2 border-b border-gray-200">
-              <Search size={14} className="mr-2 text-gray-500" />
-              <input
-                type="text"
-                placeholder="Filter by name or type"
-                className="w-full text-sm bg-transparent border-none outline-none"
-              />
-            </div>
-
-            {/* Features Tree */}
-            <div className="border-b border-gray-200">
-              <div
-                className="flex items-center p-2 hover:bg-gray-200 cursor-pointer"
-                onClick={() => setExpandedFeatures(!expandedFeatures)}
-              >
-                {expandedFeatures ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                <span className="ml-1 text-sm font-medium">Features (8)</span>
+          {isSidebarOpen && (
+            <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
+              {/* Sidebar Header */}
+              <div className="p-3 border-b border-gray-200 font-medium text-gray-700">
+                Model Browser
               </div>
-
-              {expandedFeatures && (
-                <div className="pl-2">
-                  {/* Default Geometry Section */}
-                  <div>
-                    <div
-                      className="flex items-center p-1.5 hover:bg-gray-200 cursor-pointer"
-                      onClick={() => setExpandedDefaultGeometry(!expandedDefaultGeometry)}
+              
+              {/* Feature Tree */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="p-2">
+                  <div className="mb-2">
+                    <div 
+                      className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
+                      onClick={toggleFeatures}
                     >
-                      {expandedDefaultGeometry ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      <span className="ml-1 text-sm">Default geometry</span>
+                      {expandedFeatures ? (
+                        <ChevronDown size={16} className="text-gray-500 mr-1" />
+                      ) : (
+                        <ChevronRight size={16} className="text-gray-500 mr-1" />
+                      )}
+                      <span className="font-medium text-sm">Features</span>
                     </div>
-
-                    {expandedDefaultGeometry && (
-                      <div className="pl-4">
-                        {defaultGeometryItems.map((item) => (
-                          <div key={item.id} className="flex items-center p-1.5 hover:bg-gray-200 cursor-pointer">
-                            {item.type === "origin" && (
-                              <div className="flex items-center justify-center w-4 h-4 mr-2 text-gray-600">
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <circle cx="12" cy="12" r="10" />
-                                  <line x1="2" y1="12" x2="22" y2="12" />
-                                  <line x1="12" y1="2" x2="12" y2="22" />
-                                </svg>
-                              </div>
-                            )}
-                            {item.type === "plane" && (
-                              <div className="flex items-center justify-center w-4 h-4 mr-2 text-blue-600">
-                                <svg
-                                  width="14"
-                                  height="14"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                >
-                                  <rect x="3" y="3" width="18" height="18" rx="2" />
-                                </svg>
-                              </div>
-                            )}
-                            <span className="text-sm">{item.name}</span>
-                            <button className="ml-auto p-1 text-gray-400 hover:text-gray-600">
-                              {item.active ? <Eye size={14} /> : <EyeOff size={14} />}
-                            </button>
-                          </div>
-                        ))}
+                    
+                    {expandedFeatures && (
+                      <div className="ml-5 mt-1 space-y-1">
+                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
+                          <span>Base Feature</span>
+                        </div>
+                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
+                          <span>Extrusion 1</span>
+                        </div>
+                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
+                          <span>Fillet 1</span>
+                        </div>
                       </div>
                     )}
                   </div>
-
-                  {/* Feature Items */}
-                  {featureItems.map((item) => (
-                    <div key={item.id} className="flex items-center p-1.5 pl-2 hover:bg-gray-200 cursor-pointer">
-                      {item.type === "sketch" && (
-                        <div className="flex items-center justify-center w-4 h-4 mr-2 text-green-600">
-                          <Pen size={14} />
-                        </div>
+                  
+                  <div>
+                    <div 
+                      className="flex items-center p-1 hover:bg-gray-100 rounded cursor-pointer"
+                      onClick={toggleParts}
+                    >
+                      {expandedParts ? (
+                        <ChevronDown size={16} className="text-gray-500 mr-1" />
+                      ) : (
+                        <ChevronRight size={16} className="text-gray-500 mr-1" />
                       )}
-                      {item.type === "extrude" && (
-                        <div className="flex items-center justify-center w-4 h-4 mr-2 text-orange-600">
-                          <Box size={14} />
-                        </div>
-                      )}
-                      <span className="text-sm">{item.name}</span>
-                      <button className="ml-auto p-1 text-gray-400 hover:text-gray-600">
-                        {item.active ? <Eye size={14} /> : <EyeOff size={14} />}
-                      </button>
+                      <span className="font-medium text-sm">Parts</span>
                     </div>
-                  ))}
+                    
+                    {expandedParts && (
+                      <div className="ml-5 mt-1 space-y-1">
+                        <div className="flex items-center p-1 text-sm text-gray-700 hover:bg-gray-100 rounded">
+                          <span>Default</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-
-            {/* Parts Tree */}
-            <div>
-              <div
-                className="flex items-center p-2 hover:bg-gray-200 cursor-pointer"
-                onClick={() => setExpandedParts(!expandedParts)}
-              >
-                {expandedParts ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                <span className="ml-1 text-sm font-medium">Parts (0)</span>
               </div>
-
-              {expandedParts && <div className="p-3 text-sm text-gray-500 italic">No parts defined</div>}
-            </div>
-          </div>
+            </aside>
+          )}
 
           {/* 3D Viewer */}
           <div className="relative flex-1 bg-gray-100">

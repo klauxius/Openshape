@@ -7,6 +7,10 @@ import ExportModelDialog from './ExportModelDialog';
 import ImportModelDialog from './ImportModelDialog';
 import UnitSelector from './UnitSelector';
 import { useUnits } from '../contexts/UnitContext';
+import MeasurementTool from './measurements/MeasurementTool';
+import MeasurementControls from './measurements/MeasurementControls';
+import ReferencePlanes from './ReferencePlanes';
+import { Ruler, Layers } from 'lucide-react';
 
 // Import JSCAD primitives and operations
 const { primitives, transforms, booleans } = jscad;
@@ -115,6 +119,16 @@ function JscadThreeScene() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0, z: 0 });
   
+  // Measurement tool state
+  const [measurementMode, setMeasurementMode] = useState(false);
+  const [savedMeasurements, setSavedMeasurements] = useState([]);
+  const measurementToolRef = useRef(null);
+  
+  // Reference planes state
+  const [showPlanes, setShowPlanes] = useState(true);
+  const [hoveredPlane, setHoveredPlane] = useState(null);
+  const referencePlanesRef = useRef(null);
+  
   // Get unit system from context
   const { unitSystem, setUnitSystem, format } = useUnits();
   
@@ -208,6 +222,20 @@ function JscadThreeScene() {
         // Add axes helper - shows XYZ axes with standard colors
         const axesHelper = new THREE.AxesHelper(10);
         scene.add(axesHelper);
+        
+        // Create reference planes
+        referencePlanesRef.current = ReferencePlanes({
+          scene,
+          size: 20,
+          opacity: 0.2,
+          gridDivisions: 10
+        });
+        
+        // Initialize the reference planes
+        const cleanupPlanes = referencePlanesRef.current.createPlanes();
+        
+        // Set planes visibility based on state
+        referencePlanesRef.current.toggleAllPlanesVisibility(showPlanes);
         
         // Create geometry based on model type
         let jscadGeometry;
@@ -351,11 +379,22 @@ function JscadThreeScene() {
         controls.touchRotateSpeed = 1.0;
         controls.screenSpacePanning = true; // Panning relative to cursor instead of camera
         
-        // Add a raycaster for mouse position tracking
+        // Add a raycaster for mouse position tracking, measurements, and plane highlighting
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         
-        // Track mouse position
+        // Initialize measurement tool
+        measurementToolRef.current = MeasurementTool({
+          sceneRef: sceneRef,
+          cameraRef: cameraRef,
+          controlsRef: controlsRef,
+          unitSystem,
+          onMeasurementComplete: (measurementData) => {
+            setSavedMeasurements(prev => [...prev, measurementData]);
+          }
+        });
+        
+        // Enhanced mouse move handler for both measurements and plane highlighting
         const onMouseMove = (event) => {
           // Calculate mouse position in normalized device coordinates
           const rect = renderer.domElement.getBoundingClientRect();
@@ -368,18 +407,59 @@ function JscadThreeScene() {
           // Calculate objects intersecting the picking ray
           const intersects = raycaster.intersectObjects(scene.children, true);
           
+          // Reset any previously hovered plane
+          if (hoveredPlane && referencePlanesRef.current) {
+            referencePlanesRef.current.highlightPlane(hoveredPlane, false);
+            setHoveredPlane(null);
+          }
+          
           if (intersects.length > 0) {
-            // Get the intersection point coordinates
+            // Get the intersection point coordinates for mouse position
             const point = intersects[0].point;
             setMousePosition({
               x: point.x,
               y: point.y,
               z: point.z
             });
+            
+            // Check if we're hovering over a reference plane
+            const planeObj = intersects.find(obj => 
+              obj.object.userData &&
+              obj.object.userData.type === 'referencePlane'
+            );
+            
+            if (planeObj && referencePlanesRef.current) {
+              const planeName = planeObj.object.userData.planeName;
+              referencePlanesRef.current.highlightPlane(planeName, true);
+              setHoveredPlane(planeName);
+            }
+          }
+        };
+
+        // Handle mouse clicks for measurements
+        const onMouseClick = (event) => {
+          if (!measurementMode || !measurementToolRef.current) return;
+          
+          // Calculate mouse position in normalized device coordinates
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+          
+          // Update the picking ray with the camera and mouse position
+          raycaster.setFromCamera(mouse, camera);
+          
+          // Calculate objects intersecting the picking ray
+          const intersects = raycaster.intersectObjects(scene.children, true);
+          
+          if (intersects.length > 0) {
+            // Get the intersection point coordinates and add to measurement
+            const point = intersects[0].point.clone();
+            measurementToolRef.current.addMeasurementPoint(point);
           }
         };
         
         renderer.domElement.addEventListener('mousemove', onMouseMove);
+        renderer.domElement.addEventListener('click', onMouseClick);
         
         // Animation loop
         const animate = () => {
@@ -428,12 +508,37 @@ function JscadThreeScene() {
         
         window.addEventListener('resize', handleResize);
         
+        // Handle keyboard events for measurement tool
+        const handleKeyDown = (event) => {
+          if (event.key === 'Escape') {
+            // Cancel current measurement
+            if (measurementMode) {
+              if (measurementToolRef.current) {
+                measurementToolRef.current.cancelCurrentMeasurement();
+              }
+              
+              // If user presses Escape twice, exit measurement mode entirely
+              if (savedMeasurements.length === 0) {
+                setMeasurementMode(false);
+              }
+            }
+          }
+        };
+        
+        window.addEventListener('keydown', handleKeyDown);
+        
         setLoading(false);
         
         // Return cleanup function
         return () => {
           window.removeEventListener('resize', handleResize);
+          window.removeEventListener('keydown', handleKeyDown);
           renderer.domElement.removeEventListener('mousemove', onMouseMove);
+          renderer.domElement.removeEventListener('click', onMouseClick);
+          
+          // Clean up reference planes
+          if (cleanupPlanes) cleanupPlanes();
+          
           cleanup();
         };
       } catch (error) {
@@ -444,7 +549,7 @@ function JscadThreeScene() {
     };
     
     importJscad();
-  }, [modelType]);
+  }, [modelType, measurementMode, unitSystem, showPlanes]);
 
   const handleModelChange = (event) => {
     setModelType(event.target.value);
@@ -503,263 +608,192 @@ function JscadThreeScene() {
     setUnitSystem(newUnitSystem);
   };
 
+  // Measurement tool functions
+  const toggleMeasurementMode = () => {
+    setMeasurementMode(prev => !prev);
+  };
+
+  const handleSetDistanceMeasurement = () => {
+    if (measurementToolRef.current) {
+      measurementToolRef.current.setDistanceMeasurement();
+    }
+  };
+
+  const handleSetAngleMeasurement = () => {
+    if (measurementToolRef.current) {
+      measurementToolRef.current.setAngleMeasurement();
+    }
+  };
+
+  const handleClearMeasurements = () => {
+    if (measurementToolRef.current) {
+      measurementToolRef.current.clearMeasurements();
+      setSavedMeasurements([]);
+    }
+  };
+
+  // Toggle planes visibility
+  const togglePlanesVisibility = () => {
+    setShowPlanes(prevShow => !prevShow);
+  };
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {loading && (
-        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}>
-          Loading...
-        </div>
-      )}
-      
-      {error && (
-        <div style={{ 
-          position: 'absolute', 
-          top: '50%', 
-          left: '50%', 
-          transform: 'translate(-50%, -50%)',
-          padding: '10px',
-          backgroundColor: '#fff0f0',
-          border: '1px solid #f00'
-        }}>
-          {error}
-        </div>
-      )}
-      
-      {/* Import/Export Dialogs */}
-      <ExportModelDialog 
-        isOpen={showExportDialog} 
-        onClose={() => setShowExportDialog(false)} 
-        geometry={currentGeometry} 
-      />
-      
-      <ImportModelDialog 
-        isOpen={showImportDialog} 
-        onClose={() => setShowImportDialog(false)} 
-        onImport={handleImport} 
-      />
-      
-      {/* Model Controls */}
-      <div style={{ 
-        position: 'absolute', 
-        top: '10px', 
-        left: '10px', 
-        zIndex: 10,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        color: '#333'
-      }}>
-        <select 
-          value={modelType} 
-          onChange={handleModelChange}
-          style={{
-            padding: '5px 10px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            color: '#333'
-          }}
-        >
-          <option value="cube">Cube</option>
-          <option value="cylinder">Cylinder</option>
-          <option value="complex">Complex (Subtract)</option>
-          <option value="fixed-complex">Better Complex (Subtract)</option>
-          <option value="union">Union</option>
-          <option value="extrusion">Extrusion</option>
-          <option value="rotated">Rotated</option>
-          <option value="advanced">Advanced CSG</option>
-        </select>
-        
-        {/* Navigation Help */}
-        <div style={{
-          fontSize: '12px',
-          color: '#555',
-          backgroundColor: 'rgba(255, 255, 255, 0.8)',
-          padding: '4px 8px',
-          borderRadius: '4px',
-          border: '1px solid #ddd',
-          display: 'inline-block'
-        }}>
-          <span style={{ fontWeight: 'bold' }}>Navigation: </span>
-          <span title="Industry standard CAD navigation">Middle/Left Mouse: Rotate | Right Mouse: Pan | Scroll: Zoom</span>
-        </div>
-        
-        {/* Import/Export Buttons */}
-        <div style={{ display: 'flex', gap: '5px' }}>
-          <button
+    <div className="w-full h-full relative">
+      {/* Top toolbar */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between p-2 bg-white bg-opacity-80 z-10">
+        <div className="flex items-center space-x-2">
+          <select 
+            value={modelType} 
+            onChange={handleModelChange}
+            className="border border-gray-300 rounded px-2 py-1 text-sm"
+          >
+            <option value="cube">Cube</option>
+            <option value="sphere">Sphere</option>
+            <option value="cylinder">Cylinder</option>
+            <option value="complex">Complex (Subtract)</option>
+            <option value="better-complex">Better Complex (Subtract)</option>
+            <option value="union">Union</option>
+            <option value="extrusion">Extrusion</option>
+            <option value="rotated">Rotated</option>
+            <option value="advanced-csg">Advanced CSG</option>
+          </select>
+          
+          <button 
             onClick={() => setShowImportDialog(true)}
-            style={{
-              padding: '5px 10px',
-              borderRadius: '4px',
-              border: '1px solid #ccc',
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: '12px',
-              color: '#333',
-              display: 'flex',
-              alignItems: 'center'
-            }}
+            className="flex items-center px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm"
             title="Import Model"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style={{ marginRight: '4px' }}>
-              <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm3.5 7.5a.5.5 0 0 1 0 1H5.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L5.707 7.5H11.5z"/>
-            </svg>
             Import
           </button>
           
-          <button
+          <button 
             onClick={() => setShowExportDialog(true)}
-            disabled={!currentGeometry}
-            style={{
-              padding: '5px 10px',
-              borderRadius: '4px',
-              border: '1px solid #ccc',
-              background: '#fff',
-              cursor: currentGeometry ? 'pointer' : 'not-allowed',
-              fontSize: '12px',
-              color: currentGeometry ? '#333' : '#999',
-              display: 'flex',
-              alignItems: 'center'
-            }}
+            className="flex items-center px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm"
             title="Export Model"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style={{ marginRight: '4px' }}>
-              <path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0zm3.5 7.5a.5.5 0 0 0 0 1H5.707l2.147 2.146a.5.5 0 0 0-.708.708l-3-3a.5.5 0 0 0 0-.708l3-3a.5.5 0 1 0 .708.708L5.707 7.5H11.5z"/>
-            </svg>
             Export
           </button>
         </div>
-        
-        {/* Unit Selector */}
-        <UnitSelector 
-          currentUnit={unitSystem}
-          onUnitChange={handleUnitChange}
-        />
+
+        <div className="flex items-center space-x-2">
+          <button
+            className={`flex items-center px-3 py-1 rounded text-sm ${
+              measurementMode ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
+            onClick={toggleMeasurementMode}
+            title={measurementMode ? 'Exit Measurement Mode' : 'Enter Measurement Mode'}
+          >
+            <Ruler className="mr-1.5" size={14} />
+            {measurementMode ? 'Exit Measurement' : 'Measure'}
+          </button>
+          
+          <button
+            className={`flex items-center px-3 py-1 rounded text-sm ${
+              showPlanes ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
+            onClick={togglePlanesVisibility}
+            title={showPlanes ? 'Hide Reference Planes' : 'Show Reference Planes'}
+          >
+            <Layers className="mr-1.5" size={14} />
+            {showPlanes ? 'Hide Planes' : 'Show Planes'}
+          </button>
+          
+          <UnitSelector 
+            currentUnit={unitSystem} 
+            onUnitChange={setUnitSystem}
+            className="ml-2" 
+          />
+        </div>
       </div>
-      
-      {/* View Controls */}
-      <div style={{ 
-        position: 'absolute', 
-        top: '10px', 
-        right: '10px', 
-        zIndex: 10,
-        display: 'flex',
-        gap: '5px',
-        color: '#333'
-      }}>
-        <button 
-          onClick={setFrontView}
-          style={{
-            padding: '5px 10px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            background: '#fff',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            color: '#333'
-          }}
-          title="Front View"
-        >
-          Front
-        </button>
-        
-        <button 
-          onClick={setTopView}
-          style={{
-            padding: '5px 10px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            background: '#fff',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            color: '#333'
-          }}
-          title="Top View"
-        >
-          Top
-        </button>
-        
-        <button 
-          onClick={setRightView}
-          style={{
-            padding: '5px 10px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            background: '#fff',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            color: '#333'
-          }}
-          title="Right View"
-        >
-          Right
-        </button>
-        
-        <button 
-          onClick={setIsometricView}
-          style={{
-            padding: '5px 10px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            background: '#fff',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            color: '#333'
-          }}
-          title="Isometric View"
-        >
-          Iso
-        </button>
-      </div>
-      
-      {/* ViewCube component for 3D orientation */}
-      {cameraRef.current && controlsRef.current && (
-        <ViewCube 
-          cameraRef={cameraRef} 
-          controlsRef={controlsRef}
-          position={{ right: '20px', top: '60px' }}
-        />
-      )}
-      
+
+      {/* 3D viewport */}
       <div 
         ref={mountRef} 
-        style={{ width: '100%', height: '100%' }}
+        className="w-full h-full"
+        style={{ touchAction: 'none', cursor: measurementMode ? 'crosshair' : 'grab' }}
       />
-      
-      {/* Status bar with coordinates in the selected unit system */}
-      <div style={{ 
-        position: 'absolute',
-        left: '0',
-        right: '0',
-        bottom: '0',
-        background: 'rgba(33, 33, 33, 0.8)',
-        color: 'white',
-        padding: '6px 12px',
-        fontSize: '12px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        zIndex: 5
-      }}>
-        <div style={{ display: 'flex', gap: '16px' }}>
+
+      {/* View cube */}
+      <ViewCube 
+        cameraRef={cameraRef}
+        controlsRef={controlsRef}
+        size={80}
+        position={{ top: '60px', right: '20px' }}
+      />
+
+      {/* Navigation help */}
+      <div className="absolute bottom-16 left-4 text-xs text-gray-600 bg-white bg-opacity-70 p-2 rounded">
+        <div>Left Click - Rotate</div>
+        <div>Right Click - Pan</div>
+        <div>Scroll - Zoom</div>
+      </div>
+
+      {/* Status bar with coordinates */}
+      <div className="absolute left-0 right-0 bottom-0 flex items-center justify-between px-3 py-1 bg-gray-800 bg-opacity-80 text-white text-xs">
+        <div className="flex items-center space-x-4">
           <span>X: {format(mousePosition.x)}</span>
           <span>Y: {format(mousePosition.y)}</span>
           <span>Z: {format(mousePosition.z)}</span>
         </div>
-        <div>
-          <span>Units: {unitSystem.name}</span>
+        <div className="flex items-center space-x-2">
+          <span>Units: {unitSystem.abbreviation}</span>
         </div>
       </div>
+
+      {/* Measurement controls panel */}
+      {measurementMode && (
+        <div className="absolute top-16 right-4 w-64 z-10">
+          <MeasurementControls
+            isActive={measurementMode}
+            measurementType={measurementToolRef.current?.measurementType || 'distance'}
+            onActivate={toggleMeasurementMode}
+            onDeactivate={toggleMeasurementMode}
+            onSetDistanceMeasurement={handleSetDistanceMeasurement}
+            onSetAngleMeasurement={handleSetAngleMeasurement}
+            onClearMeasurements={handleClearMeasurements}
+            measurements={savedMeasurements}
+          />
+        </div>
+      )}
+
+      {/* Dialogs */}
+      {showExportDialog && (
+        <ExportModelDialog
+          geometry={currentGeometry}
+          isOpen={showExportDialog}
+          onClose={() => setShowExportDialog(false)}
+        />
+      )}
+      
+      {showImportDialog && (
+        <ImportModelDialog
+          isOpen={showImportDialog}
+          onClose={() => setShowImportDialog(false)}
+          onModelImported={(model) => {
+            if (handleModelChange) {
+              handleModelChange({ target: { value: model } });
+            }
+          }}
+        />
+      )}
+      
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-70">
+          <div className="text-center">
+            <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-2"></div>
+            <div>Loading 3D viewer...</div>
+          </div>
+        </div>
+      )}
+      
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90">
+          <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded max-w-md">
+            <h3 className="font-bold mb-2">Error loading 3D viewer</h3>
+            <p>{error}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

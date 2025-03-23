@@ -31,8 +31,10 @@ import {
   Menu,
   X,
   Ruler,
+  Bot,
 } from "lucide-react"
 import { useUnits } from '../contexts/UnitContext'
+import initializeTools from '../lib/mcpTools';
 
 // Placeholder component for JscadThreeViewer
 const PlaceholderViewer = () => {
@@ -67,6 +69,11 @@ const JscadThreeViewer = dynamic(() => import('../components/JscadThreeViewer'),
   loading: () => <div className="flex items-center justify-center h-full">Loading 3D viewer...</div>,
 })
 
+// Import the AI Assistant component
+const AICadAssistant = dynamic(() => import('../components/AICadAssistant'), {
+  ssr: false,
+})
+
 export default function CadInterface() {
   const [mounted, setMounted] = useState(false)
   const [expandedFeatures, setExpandedFeatures] = useState(true)
@@ -81,6 +88,7 @@ export default function CadInterface() {
   const [projectName, setProjectName] = useState("New Project")
   const [isEditingName, setIsEditingName] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isAIAssistantOpen, setIsAIAssistantOpen] = useState(false)
   const projectNameInputRef = useRef(null)
   const { unitSystem, format } = useUnits()
 
@@ -226,8 +234,15 @@ export default function CadInterface() {
     setExpandedParts(!expandedParts)
   }
 
+  const toggleAIAssistant = () => {
+    setIsAIAssistantOpen(!isAIAssistantOpen)
+  }
+
   useEffect(() => {
     setMounted(true)
+    
+    // Initialize MCP tools when the component mounts
+    initializeTools();
   }, [])
 
   if (!mounted) {
@@ -305,6 +320,13 @@ export default function CadInterface() {
           </div>
 
           <div className="flex items-center ml-auto space-x-1">
+            <button 
+              className={`flex items-center justify-center w-8 h-8 rounded ${isAIAssistantOpen ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+              onClick={toggleAIAssistant}
+              title="AI Assistant"
+            >
+              <Bot size={16} />
+            </button>
             <button 
               className="flex items-center justify-center w-8 h-8 text-gray-600 hover:bg-gray-100 rounded"
               onClick={toggleUserGuide}
@@ -524,6 +546,12 @@ export default function CadInterface() {
           <div className="relative flex-1 bg-gray-100">
             <JscadThreeViewer 
               onModelChange={setActiveModel}
+            />
+
+            {/* AI Assistant */}
+            <AICadAssistant
+              isOpen={isAIAssistantOpen}
+              onToggle={toggleAIAssistant}
             />
 
             {/* Coordinate system indicator */}

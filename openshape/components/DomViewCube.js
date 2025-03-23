@@ -17,6 +17,56 @@ const DomViewCube = ({
   const animationFrameId = useRef(null);
   const [cameraControlsReady, setCameraControlsReady] = useState(false);
   
+  // Utility function to update cube orientation based on camera
+  const updateCubeOrientation = () => {
+    if (!cameraRef?.current || !containerRef.current) return;
+    
+    const camera = cameraRef.current;
+    
+    // We need to extract rotation that exactly matches CAD standard views
+    // This requires creating a direction vector for where the camera is looking
+    const lookDir = new THREE.Vector3(0, 0, -1);
+    lookDir.applyQuaternion(camera.quaternion);
+    
+    // Get camera up vector
+    const upVector = camera.up.clone();
+    
+    // Calculate absolute magnitudes for each axis to determine main direction
+    const absX = Math.abs(lookDir.x);
+    const absY = Math.abs(lookDir.y);
+    const absZ = Math.abs(lookDir.z);
+    
+    // Find dominant axis and direction
+    let rotX = 0, rotY = 0, rotZ = 0;
+    
+    // First handle standard orthographic views (along principal axes)
+    if (absX > absY && absX > absZ) {
+      // Looking primarily along X-axis
+      rotY = lookDir.x > 0 ? -90 : 90; // Right or Left view
+    } else if (absY > absX && absY > absZ) {
+      // Looking primarily along Y-axis
+      rotX = lookDir.y > 0 ? 90 : -90; // Bottom or Top view
+    } else {
+      // Looking primarily along Z-axis
+      rotY = lookDir.z > 0 ? 180 : 0;  // Back or Front view
+    }
+    
+    // For non-standard views, fall back to basic Euler angle conversion
+    if (rotX === 0 && rotY === 0 && rotZ === 0) {
+      const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'XYZ');
+      rotX = THREE.MathUtils.radToDeg(euler.x);
+      rotY = THREE.MathUtils.radToDeg(euler.y);
+      rotZ = THREE.MathUtils.radToDeg(euler.z);
+    }
+    
+    // Update cube rotation, negating to counter-rotate from camera
+    setCameraRotation({
+      x: -rotX,
+      y: -rotY,
+      z: -rotZ
+    });
+  };
+  
   // First, check when camera and controls become available
   useEffect(() => {
     // Create a function to check if camera and controls are ready
@@ -48,36 +98,19 @@ const DomViewCube = ({
     if (!cameraControlsReady) return;
     
     const camera = cameraRef.current;
-    const controls = controlsRef.current;
     
     // Track camera orientation and update the cube accordingly
-    const updateCubeOrientation = () => {
-      if (!camera || !containerRef.current) return;
-      
-      // Get the camera quaternion and convert to Euler angles
-      const quaternion = camera.quaternion.clone();
-      const euler = new THREE.Euler().setFromQuaternion(quaternion, 'XYZ');
-      
-      // Convert to degrees and normalize
-      const xDeg = THREE.MathUtils.radToDeg(euler.x);
-      const yDeg = THREE.MathUtils.radToDeg(euler.y);
-      const zDeg = THREE.MathUtils.radToDeg(euler.z);
-      
-      // Update the cube's orientation by inverting the camera rotation
-      setCameraRotation({
-        x: -xDeg,
-        y: -yDeg,
-        z: -zDeg
-      });
+    const animateUpdates = () => {
+      if (camera.userData && camera.userData.viewJustSet) {
+        // Skip this update if we just set the view manually
+        camera.userData.viewJustSet = false;
+      } else {
+        updateCubeOrientation();
+      }
+      animationFrameId.current = requestAnimationFrame(animateUpdates);
     };
     
-    // Set up animation loop to track camera changes
-    const animate = () => {
-      updateCubeOrientation();
-      animationFrameId.current = requestAnimationFrame(animate);
-    };
-    
-    animate();
+    animateUpdates();
     
     // Clean up animation frame on unmount
     return () => {
@@ -93,40 +126,117 @@ const DomViewCube = ({
       return;
     }
 
-    // Set camera position based on the clicked face
-    const distance = 20;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
     
+    // Save original state to restore properties after view change
+    const originalPosition = camera.position.clone();
+    const originalTarget = controls.target ? controls.target.clone() : new THREE.Vector3(0, 0, 0);
+
+    // Set standard view distance, keeping any existing zoom level
+    const distance = 20;
+    const currentDistance = originalPosition.distanceTo(originalTarget);
+    const zoomFactor = currentDistance > 0 ? currentDistance / distance : 1;
+    
+    // Begin with a clean slate
+    controls.target.set(0, 0, 0);
+    
+    // Set precise view orientations using strict CAD standard directions
     switch (view) {
-      case 'front':
-        cameraRef.current.position.set(0, 0, distance);
-        cameraRef.current.up.set(0, 1, 0);
+      case 'front': // Looking along negative Z
+        camera.position.set(0, 0, distance);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(0, 0, 0);
         break;
-      case 'back':
-        cameraRef.current.position.set(0, 0, -distance);
-        cameraRef.current.up.set(0, 1, 0);
+      case 'back': // Looking along positive Z
+        camera.position.set(0, 0, -distance);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(0, 0, 0);
         break;
-      case 'left':
-        cameraRef.current.position.set(-distance, 0, 0);
-        cameraRef.current.up.set(0, 1, 0);
+      case 'right': // Looking along positive X
+        camera.position.set(distance, 0, 0);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(0, 0, 0);
         break;
-      case 'right':
-        cameraRef.current.position.set(distance, 0, 0);
-        cameraRef.current.up.set(0, 1, 0);
+      case 'left': // Looking along negative X
+        camera.position.set(-distance, 0, 0);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(0, 0, 0);
         break;
-      case 'top':
-        cameraRef.current.position.set(0, distance, 0);
-        cameraRef.current.up.set(0, 0, -1);
+      case 'top': // Looking along negative Y
+        camera.position.set(0, distance, 0);
+        camera.up.set(0, 0, -1);
+        camera.lookAt(0, 0, 0);
         break;
-      case 'bottom':
-        cameraRef.current.position.set(0, -distance, 0);
-        cameraRef.current.up.set(0, 0, 1);
+      case 'bottom': // Looking along positive Y
+        camera.position.set(0, -distance, 0);
+        camera.up.set(0, 0, 1);
+        camera.lookAt(0, 0, 0);
         break;
       default:
         return;
     }
     
-    cameraRef.current.lookAt(0, 0, 0);
-    controlsRef.current.update();
+    // Force camera matrix updates
+    camera.updateProjectionMatrix();
+    camera.updateMatrix();
+    camera.updateMatrixWorld(true);
+    
+    // Complete reset of controls to prevent any lingering state
+    if (typeof controls.reset === 'function') {
+      controls.reset();
+    }
+    
+    // Completely clear any control state
+    if (controls.target) {
+      controls.target.set(0, 0, 0);
+    }
+    
+    if (controls.object && controls.object.position) {
+      // Make sure the controls object (usually camera) has the right position
+      controls.object.position.copy(camera.position);
+    }
+    
+    // Preserve any zoom level by scaling position
+    if (zoomFactor !== 1) {
+      camera.position.multiplyScalar(zoomFactor);
+    }
+    
+    // Disable damping temporarily for immediate response
+    const originalDamping = controls.enableDamping;
+    controls.enableDamping = false;
+    
+    // Force multiple control updates to ensure changes take effect
+    controls.update();
+    controls.update(); // Second update to be sure
+    
+    // Restore damping setting
+    controls.enableDamping = originalDamping;
+    
+    // Set the flag to skip the next camera update in the animation loop
+    camera.userData.viewJustSet = true;
+    
+    // Immediately update cube to match exact view
+    const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const absX = Math.abs(lookDir.x);
+    const absY = Math.abs(lookDir.y);
+    const absZ = Math.abs(lookDir.z);
+    
+    let x = 0, y = 0, z = 0;
+    
+    if (absX > absY && absX > absZ) {
+      y = lookDir.x > 0 ? -90 : 90;
+    } else if (absY > absX && absY > absZ) {
+      x = lookDir.y > 0 ? 90 : -90;
+    } else {
+      y = lookDir.z > 0 ? 180 : 0;
+    }
+    
+    setCameraRotation({
+      x: -x,
+      y: -y,
+      z: -z
+    });
   };
 
   const cubeStyle = {
@@ -161,7 +271,7 @@ const DomViewCube = ({
     cursor: 'pointer',
     fontWeight: 'bold',
     fontSize: '10px',
-    transition: 'all 0.2s',
+    transition: 'background-color 0.2s', // Only transition the background color
     color: '#333',
     backgroundColor: 'rgba(230, 230, 230, 0.7)',
     backdropFilter: 'blur(2px)',
@@ -289,11 +399,10 @@ const DomViewCube = ({
             onClick={() => handleFaceClick(face.name)}
             onMouseOver={(e) => {
               e.currentTarget.style.backgroundColor = hoverColor;
-              e.currentTarget.style.transform = `${face.transform.split(')')[0]}) scale(1.03)`;
+              // No scale transform on hover - just color change
             }}
             onMouseOut={(e) => {
               e.currentTarget.style.backgroundColor = 'rgba(230, 230, 230, 0.7)';
-              e.currentTarget.style.transform = face.transform;
             }}
           >
             {face.label}
@@ -323,15 +432,17 @@ const DomViewCube = ({
           zIndex: 20,
           pointerEvents: 'none'
         }} />
+        {/* Improved X-axis label alignment */}
         <div style={{
           position: 'absolute',
           color: axisColors.x,
           fontWeight: 'bold',
           fontSize: '10px',
-          transform: `rotateY(90deg) translateX(${axisLength + size/4}px) translateZ(${-arrowSize*2}px)`,
+          transform: `rotateY(90deg) translateX(${axisLength + size/4 + 2}px) translateZ(${-arrowSize}px)`,
           transformOrigin: 'left center',
           zIndex: 20,
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          textAlign: 'center'
         }}>X</div>
         
         {/* Y Axis (Green) */}
@@ -357,15 +468,17 @@ const DomViewCube = ({
           zIndex: 20,
           pointerEvents: 'none'
         }} />
+        {/* Improved Y-axis label alignment */}
         <div style={{
           position: 'absolute',
           color: axisColors.y,
           fontWeight: 'bold',
           fontSize: '10px',
-          transform: `rotateX(-90deg) translateY(${axisLength + size/4}px) translateX(${-arrowSize}px)`,
+          transform: `rotateX(-90deg) translateY(${axisLength + size/4 + 2}px) translateX(${-arrowSize/2}px)`,
           transformOrigin: 'center top',
           zIndex: 20,
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          textAlign: 'center'
         }}>Y</div>
         
         {/* Z Axis (Blue) */}
@@ -389,14 +502,16 @@ const DomViewCube = ({
           zIndex: 20,
           pointerEvents: 'none'
         }} />
+        {/* Improved Z-axis label alignment */}
         <div style={{
           position: 'absolute',
           color: axisColors.z,
           fontWeight: 'bold',
           fontSize: '10px',
-          transform: `translateZ(${axisLength + size/4}px) translateX(${size/2 - axisWidth}px)`,
+          transform: `translateZ(${axisLength + size/4 + 2}px) translateX(${size/2 - 3}px)`,
           zIndex: 20,
-          pointerEvents: 'none'
+          pointerEvents: 'none',
+          textAlign: 'center'
         }}>Z</div>
       </div>
     </div>

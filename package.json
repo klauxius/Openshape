@@ -1,0 +1,50 @@
+{
+  "name": "openshape",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && next export",
+    "start": "next start",
+    "lint": "next lint",
+    "electron-dev": "concurrently \"npm run dev\" \"electron .\"",
+    "electron-pack": "npm run build && electron-builder",
+    "electron-build": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.openshape.cad",
+    "productName": "OpenShape CAD",
+    "files": [
+      "out/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  },
+  "dependencies": {
+    "next": "^12.0.0",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2",
+    "electron-serve": "^1.1.0",
+    "electron-is-dev": "^2.0.0",
+    "three": "^0.146.0",
+    "lucide-react": "^0.88.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "eslint-config-next": "^12.0.0",
+    "concurrently": "^7.6.0",
+    "electron": "^21.3.1",
+    "electron-builder": "^23.6.0"
+  }
+} 

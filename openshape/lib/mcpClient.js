@@ -66,16 +66,88 @@ class MCPClient {
     }
 
     try {
-      // For now, use simulated responses
-      // In the actual implementation, this would call Claude's API
+      // Use simulated responses if enabled or no API key
+      if (!this.apiKey || process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
+        console.log('Using simulated responses for development');
+        return this.generateSimulatedResponse(message);
+      }
       
-      // Process the message and determine appropriate response
-      return this.generateSimulatedResponse(message);
+      // Format the conversation history for Claude API
+      const formattedMessages = conversation.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      
+      // Add the current message
+      formattedMessages.push({
+        role: 'user',
+        content: message
+      });
+      
+      // Prepare the Claude API request
+      const claudeRequest = {
+        model: this.modelName,
+        messages: formattedMessages,
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.",
+        max_tokens: 4000,
+        temperature: 0.7,
+        tools: this.getToolDefinitions()
+      };
+      
+      console.log('Sending request to Claude API:', claudeRequest);
+      
+      // Make the API call
+      const response = await fetch(this.apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify(claudeRequest)
+      });
+      
+      // Handle API errors
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Claude API error:', errorText);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+      
+      // Parse the response
+      const claudeResponse = await response.json();
+      console.log('Claude API response:', claudeResponse);
+      
+      // Extract tool calls if any
+      const toolCalls = [];
+      const responseContent = claudeResponse.content || [];
+      
+      // Process content blocks for text and tool calls
+      let textContent = '';
+      
+      responseContent.forEach(block => {
+        if (block.type === 'text') {
+          textContent += block.text;
+        } else if (block.type === 'tool_use') {
+          toolCalls.push({
+            name: block.name,
+            parameters: block.parameters
+          });
+        }
+      });
+      
+      // Return the formatted response
+      return {
+        role: 'assistant',
+        content: textContent,
+        toolCalls: toolCalls,
+        id: claudeResponse.id
+      };
     } catch (error) {
       console.error('Error processing message:', error);
       return {
         role: 'assistant',
-        content: 'Sorry, I encountered an error while processing your request.',
+        content: `Sorry, I encountered an error while processing your request: ${error.message}`,
         id: Date.now().toString()
       };
     }
@@ -522,7 +594,15 @@ class MCPClient {
       
       return {
         content: `I'll create a new sketch on the ${planeNames[plane]} plane${offset > 0 ? ` with offset ${offset}` : ''}.`,
-        systemMessage: "The system will now open the sketch plane selection dialog. Please select a plane to continue."
+        toolCalls: [
+          {
+            name: 'cadCreateSketch',
+            parameters: {
+              plane,
+              offset
+            }
+          }
+        ]
       };
     }
     // Drawing in sketch patterns

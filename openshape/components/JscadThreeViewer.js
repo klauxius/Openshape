@@ -1037,7 +1037,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
       <div 
         ref={mountRef} 
         className="w-full h-full"
-        style={{ touchAction: 'none', cursor: measurementMode ? 'crosshair' : 'grab' }}
+        style={{ touchAction: 'none', cursor: measurementMode ? 'crosshair' : 'default' }}
       />
 
       {/* DOM-based ViewCube component */}

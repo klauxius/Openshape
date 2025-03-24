@@ -81,12 +81,22 @@
   align-self: flex-end;
   background-color: #0066cc;
   color: white;
+  border-radius: 12px;
+  padding: 10px 14px;
+  max-width: 85%;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .assistantMessage {
   align-self: flex-start;
   background-color: #f0f0f0;
   color: #333;
+  border-radius: 12px;
+  padding: 10px 14px;
+  max-width: 85%;
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .systemMessage {
@@ -98,6 +108,85 @@
   border: 1px dashed #ddd;
   border-radius: 8px;
   font-style: italic;
+  max-width: 90%;
+}
+
+/* Tool call styling */
+.toolCall {
+  width: 90%;
+  border: 1px solid #e0e7ff;
+  background-color: #f5f8ff;
+  font-style: normal;
+  padding: 0;
+  overflow: hidden;
+}
+
+.toolHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background-color: #e0e7ff;
+  color: #4b5563;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.toolIcon {
+  color: #4338ca;
+}
+
+.codeBlock {
+  position: relative;
+  margin: 0;
+  padding: 10px;
+  background-color: #f8fafc;
+  border-top: 1px solid #e0e7ff;
+  overflow-x: auto;
+}
+
+.codeBlock pre {
+  margin: 0;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.copyButton {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: #f0f0f0;
+  border: none;
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.copyButton:hover {
+  opacity: 1;
+  background-color: #e0e0e0;
+}
+
+/* Success and error messages */
+.success {
+  background-color: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+  max-width: 90%;
+}
+
+.error {
+  background-color: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
   max-width: 90%;
 }
 

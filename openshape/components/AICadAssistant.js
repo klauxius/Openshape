@@ -1,7 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, X, Maximize2, Minimize2 } from 'lucide-react';
+import { Send, X, Maximize2, Minimize2, Clipboard, Check, Code } from 'lucide-react';
 import styles from '../styles/AICadAssistant.module.css';
 import mcpClient from '../lib/mcpClient';
+
+// Generate a unique ID for messages
+const generateUniqueId = () => {
+  return `msg_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+};
 
 const AICadAssistant = ({ isOpen, onToggle }) => {
   // Add console log to verify component is rendering
@@ -9,14 +14,15 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
   
   const [messages, setMessages] = useState([
     { 
-      id: 1, 
+      id: generateUniqueId(), 
       role: 'assistant', 
-      content: 'Hello! I\'m your CAD assistant. How can I help you with your 3D modeling today?'
+      content: 'Hello! I\'m Clapeyron, your CAD assistant. How can I help you with your 3D modeling today?'
     }
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -34,19 +40,33 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     }
   }, [isOpen, isMinimized]);
 
+  // Reset copied status after 2 seconds
+  useEffect(() => {
+    if (copiedId) {
+      const timer = setTimeout(() => setCopiedId(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [copiedId]);
+
   // Handle executing tool calls
   const handleToolCalls = async (toolCalls) => {
     if (!toolCalls || !toolCalls.length) return;
     
     for (const toolCall of toolCalls) {
       try {
+        // Format parameters to be more readable
+        const formattedParams = JSON.stringify(toolCall.parameters, null, 2);
+        
         // Add a system message showing the tool call
         setMessages(prev => [
           ...prev, 
           { 
-            id: Date.now(), 
+            id: generateUniqueId(), 
             role: 'system', 
-            content: `Executing tool: ${toolCall.name} with parameters: ${JSON.stringify(toolCall.parameters)}`
+            type: 'tool_call',
+            content: `Executing tool: ${toolCall.name}`,
+            toolName: toolCall.name,
+            parameters: formattedParams
           }
         ]);
         
@@ -58,8 +78,9 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
           setMessages(prev => [
             ...prev, 
             { 
-              id: Date.now() + 1, 
+              id: generateUniqueId(), 
               role: 'system', 
+              type: 'error',
               content: `Error: ${result.error}`
             }
           ]);
@@ -68,8 +89,9 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
           setMessages(prev => [
             ...prev, 
             { 
-              id: Date.now() + 1, 
+              id: generateUniqueId(), 
               role: 'system', 
+              type: 'success',
               content: successMessage
             }
           ]);
@@ -79,8 +101,9 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
         setMessages(prev => [
           ...prev, 
           { 
-            id: Date.now() + 2, 
+            id: generateUniqueId(), 
             role: 'system', 
+            type: 'error',
             content: `Error executing tool: ${error.message}`
           }
         ]);
@@ -93,7 +116,7 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     
     // Add user message to chat
     const userMessage = { 
-      id: Date.now(), 
+      id: generateUniqueId(), 
       role: 'user', 
       content: input.trim() 
     };
@@ -108,7 +131,7 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
       
       // Add assistant's response to chat
       setMessages(prev => [...prev, { 
-        id: Date.now(), 
+        id: generateUniqueId(), 
         role: 'assistant', 
         content: response.content || 'I processed your request.'
       }]);
@@ -120,8 +143,9 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     } catch (error) {
       console.error('Error processing message:', error);
       setMessages(prev => [...prev, { 
-        id: Date.now(), 
+        id: generateUniqueId(), 
         role: 'system', 
+        type: 'error',
         content: `Error processing your request: ${error.message}`
       }]);
     } finally {
@@ -140,6 +164,57 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     setIsMinimized(prev => !prev);
   };
 
+  const copyToClipboard = (text, id) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+  };
+
+  const renderMessage = (message) => {
+    // Determine the message class based on role and type
+    let messageClass = styles.systemMessage;
+    if (message.role === 'user') {
+      messageClass = styles.userMessage;
+    } else if (message.role === 'assistant') {
+      messageClass = styles.assistantMessage;
+    } else if (message.type === 'tool_call') {
+      messageClass = `${styles.systemMessage} ${styles.toolCall}`;
+    } else if (message.type === 'success') {
+      messageClass = `${styles.systemMessage} ${styles.success}`;
+    } else if (message.type === 'error') {
+      messageClass = `${styles.systemMessage} ${styles.error}`;
+    }
+
+    return (
+      <div key={message.id} className={messageClass}>
+        {/* Tool call message with parameters */}
+        {message.type === 'tool_call' && (
+          <>
+            <div className={styles.toolHeader}>
+              <Code size={16} className={styles.toolIcon} />
+              <span>{message.content}</span>
+            </div>
+            <div className={styles.codeBlock}>
+              <pre>{message.parameters}</pre>
+              <button 
+                className={styles.copyButton}
+                onClick={() => copyToClipboard(message.parameters, message.id)}
+                title="Copy parameters"
+              >
+                {copiedId === message.id ? <Check size={14} /> : <Clipboard size={14} />}
+              </button>
+            </div>
+          </>
+        )}
+        
+        {/* Regular messages */}
+        {!message.type && message.content}
+        
+        {/* Success or error messages */}
+        {(message.type === 'success' || message.type === 'error') && message.content}
+      </div>
+    );
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -148,7 +223,7 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     >
       {/* Header */}
       <div className={styles.header}>
-        <div className={styles.title}>AI CAD Assistant</div>
+        <div className={styles.title}>Clapeyron CAD Assistant</div>
         <div className={styles.controls}>
           <button className={styles.controlButton} onClick={toggleMinimize}>
             {isMinimized ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
@@ -162,20 +237,7 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
       {/* Message area */}
       {!isMinimized && (
         <div className={styles.messagesContainer}>
-          {messages.map(message => (
-            <div 
-              key={message.id} 
-              className={`${
-                message.role === 'user' 
-                  ? styles.userMessage 
-                  : message.role === 'assistant' 
-                    ? styles.assistantMessage 
-                    : styles.systemMessage
-              }`}
-            >
-              {message.content}
-            </div>
-          ))}
+          {messages.map(message => renderMessage(message))}
           {isTyping && (
             <div className={styles.assistantMessage}>
               <div className={styles.typingIndicator}>

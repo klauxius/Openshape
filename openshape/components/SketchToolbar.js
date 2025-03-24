@@ -38,8 +38,8 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
     
     // Set up tool-specific event handling
     const handleCanvasClick = (event) => {
-      // Only handle clicks if we're in point or line creation mode
-      if (!['point', 'line'].includes(activeTool)) return;
+      // Only handle clicks if we're in a sketch tool mode that requires point selection
+      if (!['point', 'line', 'circle'].includes(activeTool)) return;
       
       // Convert screen coordinates to model coordinates
       const viewer = document.getElementById('jscad-three-viewer');
@@ -49,15 +49,30 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
       const x = ((event.clientX - viewerRect.left) / viewerRect.width) * 2 - 1;
       const y = -((event.clientY - viewerRect.top) / viewerRect.height) * 2 + 1;
       
+      // Scale to model space - using a factor of 10 to make points more visible
+      const modelX = x * 10;
+      const modelY = y * 10;
+      
       try {
         if (activeTool === 'point') {
           // Add a point at the clicked position
           sketchManager.addEntity('point', {
-            position: [x * 10, y * 10, 0], // Scale to model space
+            position: [modelX, modelY, 0],
             size: 0.2
           });
         } else if (activeTool === 'line') {
-          // Line tool would be implemented similarly
+          // Handle line tool (to be implemented)
+          // This would need to track first point, then second point
+        } else if (activeTool === 'circle') {
+          // For circle tool implementation
+          // This simple version creates a circle at the clicked position with a fixed radius
+          // A more advanced version would let the user click for center, then drag for radius
+          sketchManager.addEntity('circle', {
+            center: [modelX, modelY],
+            radius: 3 // Default radius of 3 units
+          });
+          
+          console.log(`Created circle at [${modelX}, ${modelY}] with radius 3`);
         }
       } catch (error) {
         console.error(`Failed to add ${activeTool}:`, error);
@@ -81,6 +96,30 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
     const viewer = document.getElementById('jscad-three-viewer');
     if (viewer && viewer.__jscadViewer) {
       // Clear any temporary entities or guides
+    }
+    
+    // Update cursor style based on selected tool
+    if (document.body) {
+      // Reset cursor style
+      document.body.style.cursor = 'auto';
+      
+      // Set appropriate cursor for each tool
+      switch (tool) {
+        case 'select':
+          document.body.style.cursor = 'default';
+          break;
+        case 'point':
+          document.body.style.cursor = 'crosshair';
+          break;
+        case 'line':
+          document.body.style.cursor = 'crosshair';
+          break;
+        case 'circle':
+          document.body.style.cursor = 'crosshair';
+          break;
+        default:
+          document.body.style.cursor = 'default';
+      }
     }
     
     console.log(`Selected tool: ${tool}`);

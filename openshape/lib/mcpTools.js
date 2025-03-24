@@ -6,80 +6,105 @@ import * as jscad from '@jscad/modeling';
 import partsLibrary from './partsLibrary';
 import CADOperations from './cadOperations';
 
-// Store created models for reference and operations
-const modelStore = {
+// Model store for managing 3D models 
+export const modelStore = {
   models: {},
   activeModelId: null,
-  nextId: 1,
   
-  addModel: function(model, name, id = null) {
-    const modelId = id || `model_${this.nextId++}`;
+  // Add a model to the store
+  addModel(geometry, name = '', options = {}) {
+    const modelId = options.id || `model_${Date.now()}`;
+    console.log(`[ModelStore] Adding model: ${name || modelId}`, { geometry });
+    
     this.models[modelId] = {
       id: modelId,
-      name: name || `Model ${this.nextId-1}`,
-      geometry: model,
-      isVisible: true,
-      createdAt: new Date()
+      name: name || `Model ${Object.keys(this.models).length + 1}`,
+      geometry,
+      isVisible: options.isVisible !== undefined ? options.isVisible : true,
+      createdAt: new Date(),
+      ...options
     };
     
+    console.log(`[ModelStore] Model added with ID: ${modelId}`);
     return modelId;
   },
   
-  getModel: function(id) {
-    return this.models[id];
+  // Get a model from the store
+  getModel(modelId) {
+    return this.models[modelId];
   },
   
-  updateModel: function(id, geometry) {
-    if (this.models[id]) {
-      this.models[id].geometry = geometry;
-      this.models[id].updatedAt = new Date();
+  // Update a model in the store
+  updateModel(modelId, updates) {
+    if (!this.models[modelId]) {
+      console.warn(`[ModelStore] Model ${modelId} not found for update`);
+      return null;
+    }
+    
+    this.models[modelId] = {
+      ...this.models[modelId],
+      ...updates,
+      updatedAt: new Date()
+    };
+    
+    return this.models[modelId];
+  },
+  
+  // Remove a model from the store
+  removeModel(modelId) {
+    if (!this.models[modelId]) {
+      console.warn(`[ModelStore] Model ${modelId} not found for removal`);
+      return false;
+    }
+    
+    delete this.models[modelId];
+    return true;
+  },
+  
+  // Set the active model
+  setActiveModel(modelId) {
+    if (modelId === null || this.models[modelId]) {
+      this.activeModelId = modelId;
       return true;
     }
     return false;
   },
   
-  removeModel: function(id) {
-    if (this.models[id]) {
-      delete this.models[id];
-      return true;
-    }
-    return false;
-  },
-  
-  setActiveModel: function(id) {
-    if (id === null || this.models[id]) {
-      this.activeModelId = id;
-      return true;
-    }
-    return false;
-  },
-  
-  getActiveModel: function() {
+  // Get the active model
+  getActiveModel() {
     return this.activeModelId ? this.models[this.activeModelId] : null;
   },
   
-  setModelVisibility: function(id, isVisible) {
-    if (this.models[id]) {
-      this.models[id].isVisible = isVisible;
+  // Set model visibility
+  setModelVisibility(modelId, isVisible) {
+    if (this.models[modelId]) {
+      this.models[modelId].isVisible = isVisible;
       return true;
     }
     return false;
   },
   
-  getAllModels: function() {
+  // Get all models
+  getAllModels() {
     return Object.values(this.models);
   },
   
-  getVisibleModels: function() {
+  // Get visible models
+  getVisibleModels() {
     return Object.values(this.models).filter(model => model.isVisible);
+  },
+  
+  // Clear all models
+  clear() {
+    this.models = {};
+    this.activeModelId = null;
   }
 };
 
-// Export modelStore for use in other modules
-export { modelStore };
-
 // Notify observers about model changes
 const notifyModelChanged = (modelData) => {
+  console.log(`[ModelChanged] Dispatching model change event:`, modelData);
+  
   const event = new CustomEvent('openshape:modelChanged', {
     detail: modelData
   });
@@ -718,7 +743,7 @@ const registerUtilityTools = () => {
     execute: async () => {
       try {
         const models = modelStore.getAllModels();
-        const activeModel = modelStore.getActiveModel();
+        const activeModel = modelStore.getModel(modelStore.activeModelId);
         
         return {
           success: true,
@@ -1715,6 +1740,53 @@ const registerCADOperationsTools = () => {
       return {
         success: true,
         message: result ? 'Redid operation' : 'Nothing to redo'
+      };
+    }
+  });
+
+  // Register Add Circle to Sketch
+  mcpClient.registerTool({
+    name: 'cadAddCircleToSketch',
+    description: 'Creates a circle in the active sketch',
+    patterns: [
+      'create a circle in the sketch',
+      'add a circle to the sketch',
+      'draw a circle on the sketch',
+      'make a circle with radius {radius}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        center: {
+          type: 'array',
+          description: 'Center position of the circle [x, y]',
+          items: {
+            type: 'number'
+          }
+        },
+        radius: {
+          type: 'number',
+          description: 'Radius of the circle'
+        }
+      },
+      required: ['radius']
+    },
+    execute: async (params) => {
+      console.log('Adding circle to sketch with CADOperations:', params);
+      // Default center point if not provided
+      const center = params.center || [0, 0];
+      const radius = params.radius || 5;
+      
+      const result = CADOperations.addSketchCircle({
+        center: center,
+        radius: radius
+      });
+      
+      return {
+        success: result.success,
+        message: result.success 
+          ? `Added circle with radius ${radius} to sketch` 
+          : result.error
       };
     }
   });

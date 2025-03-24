@@ -223,6 +223,41 @@ class SketchManager {
         geometry = this.createRectangleGeometry(entity.params);
         break;
       case 'circle':
+        // Special handling for circles
+        // First, create a point for the center
+        const centerPointId = `entity_${this.activeSketch.id}_${this.activeSketch.entities.length + 1}_center`;
+        const centerEntity = {
+          id: centerPointId,
+          type: 'point',
+          params: {
+            position: entity.params.center,
+            size: 0.15, // Smaller point size for center points
+            isCenter: true // Mark as center point
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          constraints: {}
+        };
+        
+        // Add center point entity to the sketch
+        const centerGeometry = this.createPointGeometry(centerEntity.params);
+        const transformedCenterGeometry = this.transformToSketchPlane(centerGeometry);
+        const centerModelId = modelStore.addModel(transformedCenterGeometry, `point_${centerPointId}`);
+        
+        centerEntity.modelId = centerModelId;
+        this.activeSketch.entities.push(centerEntity);
+        
+        // Register center point in connection points
+        this.connectionPoints.set(centerPointId, {
+          id: centerPointId,
+          position: centerEntity.params.position,
+          connectedEntities: [entityId]
+        });
+        
+        // Store reference to center point in circle entity
+        entity.params.centerPointId = centerPointId;
+        
+        // Now create the circle geometry
         geometry = this.createCircleGeometry(entity.params);
         break;
       // Add more entity types...
@@ -285,18 +320,33 @@ class SketchManager {
           // Update any connected entities that reference this point
           connectionPoint.connectedEntities.forEach(connectedId => {
             const connectedEntity = sketch.entities.find(e => e.id === connectedId);
-            if (connectedEntity && connectedEntity.type === 'line') {
-              if (connectedEntity.params.startPointId === entityId) {
-                connectedEntity.params.startPoint = entity.params.position;
-              } else if (connectedEntity.params.endPointId === entityId) {
-                connectedEntity.params.endPoint = entity.params.position;
+            if (connectedEntity) {
+              if (connectedEntity.type === 'line') {
+                if (connectedEntity.params.startPointId === entityId) {
+                  connectedEntity.params.startPoint = entity.params.position;
+                } else if (connectedEntity.params.endPointId === entityId) {
+                  connectedEntity.params.endPoint = entity.params.position;
+                }
+                
+                // Update the line geometry
+                const lineGeometry = this.createLineGeometry(connectedEntity.params);
+                const transformedLineGeometry = this.transformToSketchPlane(lineGeometry);
+                modelStore.updateModel(connectedEntity.modelId, transformedLineGeometry);
+                notifyModelChanged({ id: connectedEntity.modelId, geometry: transformedLineGeometry });
+              } else if (connectedEntity.type === 'circle') {
+                // Check if this point is a center of a circle
+                if (connectedEntity.params.centerPointId === entityId) {
+                  // Update circle center position
+                  connectedEntity.params.center = entity.params.position;
+                  
+                  // Update the circle geometry
+                  const circleGeometry = this.createCircleGeometry(connectedEntity.params);
+                  const transformedCircleGeometry = this.transformToSketchPlane(circleGeometry);
+                  modelStore.updateModel(connectedEntity.modelId, transformedCircleGeometry);
+                  notifyModelChanged({ id: connectedEntity.modelId, geometry: transformedCircleGeometry });
+                }
               }
-              
-              // Update the line geometry
-              const lineGeometry = this.createLineGeometry(connectedEntity.params);
-              const transformedLineGeometry = this.transformToSketchPlane(lineGeometry);
-              modelStore.updateModel(connectedEntity.modelId, transformedLineGeometry);
-              notifyModelChanged({ id: connectedEntity.modelId, geometry: transformedLineGeometry });
+              // Add handling for other entity types as needed
             }
           });
         }
@@ -309,6 +359,27 @@ class SketchManager {
         break;
       case 'circle':
         geometry = this.createCircleGeometry(entity.params);
+        // If center parameter changed, also update the center point entity
+        if (newParams.center && entity.params.centerPointId) {
+          const centerPointEntity = sketch.entities.find(e => e.id === entity.params.centerPointId);
+          if (centerPointEntity) {
+            // Update the center point position
+            centerPointEntity.params.position = newParams.center;
+            
+            // Update the center point geometry
+            const centerGeometry = this.createPointGeometry(centerPointEntity.params);
+            const transformedCenterGeometry = this.transformToSketchPlane(centerGeometry);
+            modelStore.updateModel(centerPointEntity.modelId, transformedCenterGeometry);
+            notifyModelChanged({ id: centerPointEntity.modelId, geometry: transformedCenterGeometry });
+            
+            // Update the connection point
+            if (this.connectionPoints.has(entity.params.centerPointId)) {
+              const connectionPoint = this.connectionPoints.get(entity.params.centerPointId);
+              connectionPoint.position = newParams.center;
+              this.connectionPoints.set(entity.params.centerPointId, connectionPoint);
+            }
+          }
+        }
         break;
       // Handle other types...
     }
@@ -336,25 +407,84 @@ class SketchManager {
     if (index === -1) return;
 
     const [deleted] = sketch.entities.splice(index, 1);
+    
+    // Store information for undo/redo operations
+    const deletedEntityInfo = {
+      entity: { ...deleted },
+      geometry: modelStore.getModel(deleted.modelId)?.geometry,
+      index
+    };
+    
+    // Remove the model
     modelStore.removeModel(deleted.modelId);
     notifyModelChanged({ id: deleted.modelId, removed: true });
     
-    // If this is a point, remove it from connection points and update any connected entities
-    if (deleted.type === 'point' && this.connectionPoints.has(entityId)) {
-      const connectionPoint = this.connectionPoints.get(entityId);
-      
-      // Remove references to this point from connected entities
-      connectionPoint.connectedEntities.forEach(connectedId => {
-        const connectedEntity = sketch.entities.find(e => e.id === connectedId);
-        if (connectedEntity && connectedEntity.type === 'line') {
-          // If the line was connected to this point, delete the line too
-          this.deleteEntity(connectedId);
+    // Special handling for different entity types
+    if (deleted.type === 'point') {
+      // If this is a point, remove it from connection points and handle connected entities
+      if (this.connectionPoints.has(entityId)) {
+        const connectionPoint = this.connectionPoints.get(entityId);
+        
+        // Remove references to this point from connected entities
+        connectionPoint.connectedEntities.forEach(connectedId => {
+          const connectedEntity = sketch.entities.find(e => e.id === connectedId);
+          if (connectedEntity) {
+            if (connectedEntity.type === 'line') {
+              // If the line was connected to this point, delete the line too
+              this.deleteEntity(connectedId);
+            } else if (connectedEntity.type === 'circle') {
+              // If the circle was using this point as center, delete the circle too
+              if (connectedEntity.params.centerPointId === entityId) {
+                this.deleteEntity(connectedId);
+              }
+            }
+          }
+        });
+        
+        // Remove the point from the connection points map
+        this.connectionPoints.delete(entityId);
+      }
+    } else if (deleted.type === 'circle') {
+      // When deleting a circle, check if we need to delete its center point
+      if (deleted.params.centerPointId) {
+        const centerPointId = deleted.params.centerPointId;
+        const connectionPoint = this.connectionPoints.get(centerPointId);
+        
+        if (connectionPoint) {
+          // Remove this circle from the connected entities of the center point
+          connectionPoint.connectedEntities = connectionPoint.connectedEntities.filter(id => id !== entityId);
+          
+          // If this was the only entity using this center point, delete the center point
+          if (connectionPoint.connectedEntities.length === 0) {
+            // Find and delete the center point entity
+            const centerPointIndex = sketch.entities.findIndex(e => e.id === centerPointId);
+            if (centerPointIndex !== -1) {
+              const [centerPoint] = sketch.entities.splice(centerPointIndex, 1);
+              modelStore.removeModel(centerPoint.modelId);
+              notifyModelChanged({ id: centerPoint.modelId, removed: true });
+              
+              // Remove from connection points map
+              this.connectionPoints.delete(centerPointId);
+            }
+          } else {
+            // Update the connection point map to reflect the removed connection
+            this.connectionPoints.set(centerPointId, connectionPoint);
+          }
         }
-      });
-      
-      // Remove the point from the connection points map
-      this.connectionPoints.delete(entityId);
+      }
     }
+    
+    // Record in history
+    this.#recordHistory({
+      undo: () => {
+        sketch.entities.splice(deletedEntityInfo.index, 0, deletedEntityInfo.entity);
+        if (deletedEntityInfo.geometry) {
+          modelStore.addModel(deletedEntityInfo.geometry, deletedEntityInfo.entity.modelId);
+          notifyModelChanged({ id: deletedEntityInfo.entity.modelId, geometry: deletedEntityInfo.geometry });
+        }
+      },
+      redo: () => this.deleteEntity(entityId)
+    });
   }
   
   // Create a connection between two points
@@ -622,6 +752,27 @@ class SketchManager {
       });
     }
     
+    // Special handling for sketch entities with points array (like circles, lines)
+    if (geometry.points && Array.isArray(geometry.points)) {
+      // For sketch entities, we want to preserve the points array structure
+      // but make sure the metadata includes the sketch plane information
+      const offset = this.activeSketch.offset || 0;
+      
+      // Create a deep copy of the geometry to avoid modifying the original
+      const transformedGeometry = {
+        ...geometry,
+        metadata: {
+          ...(geometry.metadata || {}),
+          sketchOffset: offset,
+          sketchPlane: this.activeSketch.plane
+        }
+      };
+      
+      console.log(`[SketchManager] Transformed sketch entity to plane ${this.activeSketch.plane} with offset ${offset}`);
+      
+      return transformedGeometry;
+    }
+    
     // Check if we have at least 3 points to create a proper polygon
     if (!geometry.points || geometry.points.length < 3) {
       console.warn('Geometry has less than 3 points, which may not be suitable for creating a polygon');
@@ -732,7 +883,17 @@ class SketchManager {
       points.push([x, y]);
     }
     
-    return { points };
+    // Return geometry with metadata
+    return { 
+      points,
+      metadata: {
+        type: 'circle',
+        center: center,
+        radius: radius,
+        centerPointId: params.centerPointId,
+        sketchOffset: this.activeSketch ? this.activeSketch.offset : 0
+      }
+    };
   }
 
   // Get the active sketch

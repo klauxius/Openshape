@@ -8,7 +8,7 @@ class MCPClient {
   constructor() {
     this.tools = [];
     this.conversationId = null;
-    this.apiEndpoint = process.env.NEXT_PUBLIC_CLAUDE_API_ENDPOINT || 'https://api.anthropic.com/v1/messages';
+    this.apiEndpoint = '/api/claude';
     this.apiKey = process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
     this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-opus-20240229';
   }
@@ -94,15 +94,13 @@ class MCPClient {
         tools: this.getToolDefinitions()
       };
       
-      console.log('Sending request to Claude API:', claudeRequest);
+      console.log('Sending request via proxy API route:', this.apiEndpoint);
       
-      // Make the API call
+      // Make the API call via our proxy route
       const response = await fetch(this.apiEndpoint, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
-          'anthropic-version': '2023-06-01'
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(claudeRequest)
       });
@@ -613,10 +611,40 @@ class MCPClient {
         systemMessage: "The system is currently in sketch mode. Please use the sketch tools to create geometry."
       };
     }
-    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['circle', 'rectangle', 'polygon']) && 
+    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['circle']) && 
             this.matchesPattern(lowerMessage, ['in', 'to', 'on'], ['sketch'])) {
-      const shape = lowerMessage.includes('circle') ? 'circle' : 
-                    lowerMessage.includes('rectangle') ? 'rectangle' : 'polygon';
+      // Default parameters for circle
+      let radius = 5;
+      let center = [0, 0];
+      
+      // Extract radius if provided
+      const radiusMatch = message.match(/radius\s*[=:]\s*(\d+(\.\d+)?)/i) || message.match(/radius\s+of\s+(\d+(\.\d+)?)/i);
+      if (radiusMatch) {
+        radius = parseFloat(radiusMatch[1]);
+      }
+      
+      // Extract center if provided
+      const centerMatch = message.match(/at\s*\[?\s*(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)\s*\]?/i);
+      if (centerMatch) {
+        center = [parseFloat(centerMatch[1]), parseFloat(centerMatch[3])];
+      }
+      
+      return {
+        content: `I'll create a circle with radius ${radius} at position [${center}] in the sketch.`,
+        toolCalls: [
+          {
+            name: 'cadAddCircleToSketch',
+            parameters: {
+              center,
+              radius
+            }
+          }
+        ]
+      };
+    }
+    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['rectangle', 'polygon']) && 
+            this.matchesPattern(lowerMessage, ['in', 'to', 'on'], ['sketch'])) {
+      const shape = lowerMessage.includes('rectangle') ? 'rectangle' : 'polygon';
       
       return {
         content: `To draw a ${shape} in the sketch, select the ${shape} tool from the sketch toolbar and define the shape parameters.`,

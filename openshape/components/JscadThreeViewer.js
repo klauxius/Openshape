@@ -113,56 +113,162 @@ class ErrorBoundary extends React.Component {
 
 // This function converts JSCAD geometry polygons to a Three.js BufferGeometry
 function jscadToThreeGeometry(jscadGeometry) {
+  console.log('[JscadThreeViewer] Converting JSCAD geometry to Three.js geometry:', jscadGeometry);
+  
+  // Validate input
+  if (!jscadGeometry) {
+    console.error('[JscadThreeViewer] Invalid geometry:', jscadGeometry);
+    // Return a simple placeholder geometry
+    return new THREE.BoxGeometry(1, 1, 1);
+  }
+  
+  // Handle native JSCAD 2D shapes (like circles) that use 'sides' instead of 'points'
+  if (jscadGeometry.sides && Array.isArray(jscadGeometry.sides)) {
+    try {
+      console.log('[JscadThreeViewer] Processing JSCAD 2D geometry with sides array');
+      
+      const positions = [];
+      const indices = [];
+      
+      // Extract all points from the sides (each side is a line segment [startPoint, endPoint])
+      jscadGeometry.sides.forEach((side, i) => {
+        // Each side has two points [start, end]
+        const startPoint = side[0];
+        
+        // Add Z coordinate as 0 for 2D shapes
+        positions.push(startPoint[0], startPoint[1], 0);
+      });
+      
+      // Create indices for line segments forming a loop
+      for (let i = 0; i < jscadGeometry.sides.length; i++) {
+        indices.push(i, (i + 1) % jscadGeometry.sides.length);
+      }
+      
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      
+      console.log(`[JscadThreeViewer] Created line geometry from ${jscadGeometry.sides.length} sides`);
+      return geometry;
+    } catch (error) {
+      console.error('[JscadThreeViewer] Error converting JSCAD 2D geometry:', error);
+      return new THREE.BoxGeometry(1, 1, 1); // Fallback
+    }
+  }
+  
+  // Handle sketch geometry (2D shapes) that use 'points' instead of 'polygons'
+  if (jscadGeometry.points && Array.isArray(jscadGeometry.points)) {
+    try {
+      console.log('[JscadThreeViewer] Processing sketch geometry with points array');
+      
+      const positions = [];
+      const indices = [];
+      
+      // Extract points (2D) and add Z coordinate for 3D space
+      const offset = jscadGeometry.metadata?.sketchOffset || 0;
+      const points3D = jscadGeometry.points.map(p => [p[0], p[1], offset]);
+      
+      // For sketch entities like circles, we want to create a line loop
+      for (let i = 0; i < points3D.length; i++) {
+        positions.push(...points3D[i]);
+      }
+      
+      // Create indices for line segments
+      for (let i = 0; i < points3D.length; i++) {
+        indices.push(i, (i + 1) % points3D.length);
+      }
+      
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      
+      console.log(`[JscadThreeViewer] Created line geometry from ${points3D.length} points`);
+      return geometry;
+    } catch (error) {
+      console.error('[JscadThreeViewer] Error converting sketch geometry:', error);
+      return new THREE.BoxGeometry(1, 1, 1); // Fallback
+    }
+  }
+  
+  if (!jscadGeometry.polygons || !Array.isArray(jscadGeometry.polygons)) {
+    console.error('[JscadThreeViewer] Geometry has no polygons array:', jscadGeometry);
+    // Return a simple placeholder geometry
+    return new THREE.BoxGeometry(1, 1, 1);
+  }
+  
   // Extract vertices and faces from JSCAD geometry
   const positions = [];
   const normals = [];
   const indices = [];
   
   let vertexIndex = 0;
+  let polygonCount = 0;
   
-  // Process each polygon in the JSCAD geometry
-  jscadGeometry.polygons.forEach(polygon => {
-    // Get vertices of this polygon
-    const vertices = polygon.vertices.map(v => [v[0], v[1], v[2]]);
-    
-    if (vertices.length < 3) return; // Skip invalid polygons
-    
-    // Calculate normal
-    const v0 = new THREE.Vector3(...vertices[0]);
-    const v1 = new THREE.Vector3(...vertices[1]);
-    const v2 = new THREE.Vector3(...vertices[2]);
-    
-    const edge1 = new THREE.Vector3().subVectors(v1, v0);
-    const edge2 = new THREE.Vector3().subVectors(v2, v0);
-    const normal = new THREE.Vector3().crossVectors(edge1, edge2).normalize();
-    
-    // For faces with more than 3 vertices, we need to triangulate
-    for (let i = 0; i < vertices.length - 2; i++) {
-      // Add vertices to positions array
-      positions.push(...vertices[0], ...vertices[i+1], ...vertices[i+2]);
+  try {
+    // Process each polygon in the JSCAD geometry
+    jscadGeometry.polygons.forEach(polygon => {
+      // Validate polygon
+      if (!polygon || !polygon.vertices || !Array.isArray(polygon.vertices)) {
+        console.warn('[JscadThreeViewer] Invalid polygon:', polygon);
+        return;
+      }
       
-      // Add normal for each vertex
-      normals.push(
-        normal.x, normal.y, normal.z,
-        normal.x, normal.y, normal.z,
-        normal.x, normal.y, normal.z
-      );
+      // Get vertices of this polygon
+      const vertices = polygon.vertices.map(v => [v[0], v[1], v[2]]);
       
-      // Add triangle indices
-      indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
-      vertexIndex += 3;
-    }
-  });
-  
-  // Create Three.js BufferGeometry
-  const geometry = new THREE.BufferGeometry();
-  
-  // Add attributes
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setIndex(indices);
-  
-  return geometry;
+      if (vertices.length < 3) {
+        console.warn('[JscadThreeViewer] Polygon has fewer than 3 vertices:', vertices);
+        return; // Skip invalid polygons
+      }
+      
+      // Calculate normal
+      const v0 = new THREE.Vector3(...vertices[0]);
+      const v1 = new THREE.Vector3(...vertices[1]);
+      const v2 = new THREE.Vector3(...vertices[2]);
+      
+      const edge1 = new THREE.Vector3().subVectors(v1, v0);
+      const edge2 = new THREE.Vector3().subVectors(v2, v0);
+      const normal = new THREE.Vector3().crossVectors(edge1, edge2).normalize();
+      
+      // For faces with more than 3 vertices, we need to triangulate
+      for (let i = 0; i < vertices.length - 2; i++) {
+        // Add vertices to positions array
+        positions.push(...vertices[0], ...vertices[i+1], ...vertices[i+2]);
+        
+        // Add normal for each vertex
+        normals.push(
+          normal.x, normal.y, normal.z,
+          normal.x, normal.y, normal.z,
+          normal.x, normal.y, normal.z
+        );
+        
+        // Add triangle indices
+        indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
+        vertexIndex += 3;
+      }
+      
+      polygonCount++;
+    });
+    
+    console.log(`[JscadThreeViewer] Processed ${polygonCount} polygons, created ${indices.length / 3} triangles`);
+    
+    // Create Three.js BufferGeometry
+    const geometry = new THREE.BufferGeometry();
+    
+    // Add attributes
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setIndex(indices);
+    
+    // Center the geometry if it's not centered
+    geometry.computeBoundingSphere();
+    console.log('[JscadThreeViewer] Geometry bounding sphere:', geometry.boundingSphere);
+    
+    return geometry;
+  } catch (error) {
+    console.error('[JscadThreeViewer] Error converting geometry:', error);
+    return new THREE.BoxGeometry(1, 1, 1); // Fallback
+  }
 }
 
 const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
@@ -216,34 +322,27 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
   useEffect(() => {
     // Handler for MCP model change events
     const handleMcpModelChange = (event) => {
-      const modelData = event.detail?.model;
+      // Extract model data from the event
+      const modelData = event.detail;
+      console.log(`[JscadThreeViewer] MCP model change received: ${modelData.id}`, modelData);
       
-      if (!modelData) return;
-      
-      console.log('MCP model change received:', modelData);
-      
-      if (modelData.deleted) {
-        // Handle model deletion
-        setMcpModels(prev => {
-          const newModels = { ...prev };
-          delete newModels[modelData.id];
-          return newModels;
-        });
-        
-        // Remove mesh from scene if it exists
-        if (meshesRef.current[modelData.id] && sceneRef.current) {
-          sceneRef.current.remove(meshesRef.current[modelData.id]);
-          delete meshesRef.current[modelData.id];
-        }
-        
-        return;
-      }
-      
-      // Update models state
+      // Add to the models tracking state
       setMcpModels(prev => ({
         ...prev,
         [modelData.id]: modelData
       }));
+      
+      // If this is our first model, reset the camera to a good view
+      if (Object.keys(mcpModels).length === 0 && cameraRef.current && controlsRef.current) {
+        // Use a local resetView function instead of trying to access one from outer scope
+        const resetCamera = () => {
+          console.log('[JscadThreeViewer] Resetting camera to isometric view');
+          cameraRef.current.position.set(30, 30, 30);
+          cameraRef.current.lookAt(0, 0, 0);
+          controlsRef.current.update();
+        };
+        resetCamera();
+      }
       
       // If we have a scene, update the visual representation
       if (sceneRef.current && modelData.geometry) {
@@ -253,26 +352,59 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             sceneRef.current.remove(meshesRef.current[modelData.id]);
           }
           
+          // Check if this is a sketch entity (has points array) or JSCAD 2D geometry (has sides array)
+          const isSketchEntity = modelData.geometry.points && Array.isArray(modelData.geometry.points);
+          const isJscad2D = modelData.geometry.sides && Array.isArray(modelData.geometry.sides);
+          
+          console.log(`[JscadThreeViewer] Processing geometry for model ${modelData.id}:`, {
+            type: isSketchEntity ? '2D sketch entity' : isJscad2D ? '2D JSCAD geometry' : '3D model',
+            hasPoints: !!modelData.geometry.points,
+            hasSides: !!modelData.geometry.sides,
+            hasPolygons: !!modelData.geometry.polygons,
+            metadata: modelData.geometry.metadata || 'none'
+          });
+
           // Convert JSCAD geometry to Three.js geometry
           const threeGeometry = jscadToThreeGeometry(modelData.geometry);
           
-          // Create material (different color for each model for distinction)
-          const modelIndex = Object.keys(mcpModels).length;
-          const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
-          const material = new THREE.MeshStandardMaterial({
-            color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
-            metalness: 0.2,
-            roughness: 0.5,
-          });
+          // Create material based on the type of geometry
+          let material;
           
-          // Create mesh
-          const mesh = new THREE.Mesh(threeGeometry, material);
+          if (isSketchEntity || isJscad2D) {
+            // For sketch entities or JSCAD 2D shapes (like circles), use a line material
+            const modelIndex = Object.keys(mcpModels).length;
+            const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
+            material = new THREE.LineBasicMaterial({
+              color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+              linewidth: 2, // Note: linewidth > 1 only works in WebGL 2
+            });
+          } else {
+            // For 3D models, use a standard material
+            const modelIndex = Object.keys(mcpModels).length;
+            const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
+            material = new THREE.MeshStandardMaterial({
+              color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+              metalness: 0.2,
+              roughness: 0.5,
+            });
+          }
+          
+          // Create appropriate mesh or line based on geometry type
+          let object;
+          
+          if (isSketchEntity || isJscad2D) {
+            // For sketch entities or JSCAD 2D shapes, create a line loop
+            object = new THREE.LineLoop(threeGeometry, material);
+          } else {
+            // For 3D models, create a regular mesh
+            object = new THREE.Mesh(threeGeometry, material);
+          }
           
           // Add to scene
-          sceneRef.current.add(mesh);
+          sceneRef.current.add(object);
           
-          // Store reference to mesh
-          meshesRef.current[modelData.id] = mesh;
+          // Store reference to the object
+          meshesRef.current[modelData.id] = object;
         } catch (error) {
           console.error('Error updating MCP model visualization:', error);
         }
@@ -302,8 +434,10 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
       if (!controlsRef.current || !cameraRef.current) return;
       
       if (active) {
-        // Disable rotation when entering sketch mode
+        // Disable rotation and zooming in sketch mode - only allow panning
         controlsRef.current.enableRotate = false;
+        controlsRef.current.enableZoom = false;  // Disable zooming in sketch mode
+        controlsRef.current.enablePan = true;    // Allow panning for positioning
         
         // Store the sketch plane for reference
         const sketchPlane = plane || (sketch ? sketch.plane : 'xy');
@@ -355,8 +489,10 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         
         console.log('Camera positioned normal to sketch plane:', sketchPlane);
       } else {
-        // Re-enable rotation when exiting sketch mode
+        // Re-enable all controls when exiting sketch mode
         controlsRef.current.enableRotate = true;
+        controlsRef.current.enableZoom = true;   // Re-enable zooming
+        controlsRef.current.enablePan = true;    // Keep panning enabled
         
         // Save the current camera position for this sketch before exiting
         if (sketch && sketch.id) {
@@ -370,7 +506,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           };
         }
         
-        console.log('Camera rotation re-enabled');
+        console.log('Camera controls fully re-enabled');
       }
     };
     
@@ -415,11 +551,14 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           };
         }
         
-        // Disable rotation controls
+        // Disable rotation and zooming controls, but allow panning
         controlsRef.current.enableRotate = false;
+        controlsRef.current.enableZoom = false;  // Disable zooming in sketch mode
+        controlsRef.current.enablePan = true;    // Allow panning for positioning
         controlsRef.current.update();
         
         console.log('Sketch created - Camera positioned normal to plane:', plane);
+        console.log('Camera rotation and zooming disabled for sketch mode');
       }
     };
     
@@ -484,6 +623,13 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         standardPosition.target[2]
       );
       
+      // Make sure sketch mode constraints remain in place
+      if (inSketchMode) {
+        controlsRef.current.enableRotate = false;
+        controlsRef.current.enableZoom = false;
+        controlsRef.current.enablePan = true;
+      }
+      
       // Update controls and store this position
       controlsRef.current.update();
       
@@ -495,14 +641,14 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         };
       }
       
-      console.log('Camera view manually reset for sketch plane:', sketchPlane);
+      console.log('Camera view reset for sketch plane:', sketchPlane);
     };
     
     window.addEventListener('openshape:resetSketchView', handleResetSketchView);
     return () => {
       window.removeEventListener('openshape:resetSketchView', handleResetSketchView);
     };
-  }, [activeSketchPlane]);
+  }, [activeSketchPlane, inSketchMode]);
 
   useEffect(() => {
     // Early return if the ref isn't set yet
@@ -539,8 +685,13 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         
         // Create camera
         const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-        camera.position.set(15, 15, 15);
+        
+        // Camera adjustment for better view of geometries
+        // Position camera to view objects more clearly
+        camera.position.set(30, 30, 30);
         camera.lookAt(0, 0, 0);
+        
+        // Store camera reference for external access
         cameraRef.current = camera;
         
         // Create renderer
@@ -548,15 +699,26 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         renderer.setSize(width, height);
         mountRef.current.appendChild(renderer.domElement);
         
-        // Create orbit controls with initial settings based on sketch mode
+        // Create and configure OrbitControls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.25;
         
-        // Initialize rotation based on current sketch mode
-        controls.enableRotate = !inSketchMode;
+        // Set initial camera view for a better viewing angle
+        controls.update();
         
-        // Configure mouse buttons for standard CAD interaction
+        // Add a function to reset the view to isometric position
+        const resetView = () => {
+          console.log('[JscadThreeViewer] Resetting camera to isometric view');
+          camera.position.set(30, 30, 30);
+          camera.lookAt(0, 0, 0);
+          controls.update();
+        };
+        
+        // Reset the view after 500ms to ensure models are visible
+        setTimeout(resetView, 500);
+        
+        // Define button mappings (which mouse buttons do what)
         controls.mouseButtons = {
           LEFT: THREE.MOUSE.ROTATE,      // Left mouse button: Rotate (when not in sketch mode)
           MIDDLE: THREE.MOUSE.ROTATE,    // Middle mouse button: Rotate (industry standard)

@@ -540,9 +540,20 @@ const SidebarFixed = ({ isOpen, onClose }) => {
                 }
                 <span className="font-medium">Sketches</span>
               </div>
-              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
-                {allSketches.length}
-              </span>
+              
+              {/* Add button to create new sketch */}
+              <button
+                className="p-1 rounded hover:bg-blue-100 text-blue-600"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // Dispatch an event to create a new sketch
+                  const event = new CustomEvent('openshape:requestCreateSketch');
+                  window.dispatchEvent(event);
+                }}
+                title="Create new sketch"
+              >
+                <Edit size={16} />
+              </button>
             </div>
             
             {expandedSections.sketches && (

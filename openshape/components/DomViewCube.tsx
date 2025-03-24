@@ -83,7 +83,7 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
         // Back view (+Z)
         setCameraRotation({ x: 0, y: 180, z: 0 });
         return;
-    } else {
+      } else {
         // Front view (-Z)
         setCameraRotation({ x: 0, y: 0, z: 0 });
         return;

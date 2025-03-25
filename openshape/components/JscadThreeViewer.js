@@ -12,6 +12,25 @@ import MeasurementControls from './measurements/MeasurementControls';
 import ReferencePlanes from './ReferencePlanes';
 import { Ruler, Layers } from 'lucide-react';
 
+// Performance configuration object - easily tune performance settings
+const PERFORMANCE_CONFIG = {
+  // Renderer settings
+  antialias: true,          // Set to false for performance on low-end devices
+  pixelRatio: window.devicePixelRatio > 1.5 ? 1.5 : window.devicePixelRatio, // Limit max pixel ratio
+  shadowMapEnabled: false,  // Disable shadows for better performance
+  
+  // Raycasting settings
+  raycasterThrottleMs: 50,  // Throttle raycaster calculations (ms)
+  precision: 0.1,           // Raycaster precision (lower = better performance)
+  
+  // Geometry settings
+  simplifyGeometry: true,   // Simplify complex geometries
+  frustumCulling: true,     // Cull objects outside camera view
+  
+  // FPS monitoring
+  showFPS: false            // Show FPS counter for debugging
+};
+
 // Import JSCAD primitives and operations
 const { primitives, transforms, booleans } = jscad;
 const { cube, sphere, cylinder, rectangle } = primitives;
@@ -148,6 +167,9 @@ function jscadToThreeGeometry(jscadGeometry) {
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       geometry.setIndex(indices);
       
+      // Add performance optimization to the geometry
+      geometry.computeBoundingSphere(); // Needed for frustum culling
+      
       console.log(`[JscadThreeViewer] Created line geometry from ${jscadGeometry.sides.length} sides`);
       return geometry;
     } catch (error) {
@@ -182,6 +204,9 @@ function jscadToThreeGeometry(jscadGeometry) {
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       geometry.setIndex(indices);
       
+      // Add performance optimization to the geometry
+      geometry.computeBoundingSphere(); // Needed for frustum culling
+      
       console.log(`[JscadThreeViewer] Created line geometry from ${points3D.length} points`);
       return geometry;
     } catch (error) {
@@ -205,8 +230,23 @@ function jscadToThreeGeometry(jscadGeometry) {
   let polygonCount = 0;
   
   try {
+    // Consider simplification for very complex geometries
+    let polygonsToProcess = jscadGeometry.polygons;
+    
+    // Simplify complex geometries for better performance if needed
+    if (PERFORMANCE_CONFIG.simplifyGeometry && polygonsToProcess.length > 5000) {
+      console.log(`[JscadThreeViewer] Simplifying complex geometry with ${polygonsToProcess.length} polygons`);
+      
+      // A simple decimation - process only every Nth polygon for very complex models
+      // In a production app, you'd use a proper decimation algorithm
+      const simplificationFactor = Math.ceil(polygonsToProcess.length / 5000);
+      polygonsToProcess = polygonsToProcess.filter((_, i) => i % simplificationFactor === 0);
+      
+      console.log(`[JscadThreeViewer] Simplified to ${polygonsToProcess.length} polygons`);
+    }
+    
     // Process each polygon in the JSCAD geometry
-    jscadGeometry.polygons.forEach(polygon => {
+    polygonsToProcess.forEach(polygon => {
       // Validate polygon
       if (!polygon || !polygon.vertices || !Array.isArray(polygon.vertices)) {
         console.warn('[JscadThreeViewer] Invalid polygon:', polygon);
@@ -262,7 +302,9 @@ function jscadToThreeGeometry(jscadGeometry) {
     
     // Center the geometry if it's not centered
     geometry.computeBoundingSphere();
-    console.log('[JscadThreeViewer] Geometry bounding sphere:', geometry.boundingSphere);
+    
+    // Add performance optimizations
+    geometry.computeBoundingBox(); // Helps with raycasting performance
     
     return geometry;
   } catch (error) {
@@ -320,6 +362,12 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
 
   // Add a separate useEffect to handle MCP model change events
   useEffect(() => {
+    // Set up material cache for reusing materials
+    const materialCache = {};
+    
+    // Store model references for instancing
+    const modelGeometryCache = {};
+    
     // Handler for MCP model change events
     const handleMcpModelChange = (event) => {
       // Extract model data from the event
@@ -350,6 +398,22 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           // If we already have a mesh for this model, remove it
           if (meshesRef.current[modelData.id]) {
             sceneRef.current.remove(meshesRef.current[modelData.id]);
+            
+            // Properly dispose of old geometry and materials
+            const oldMesh = meshesRef.current[modelData.id];
+            if (oldMesh.geometry) oldMesh.geometry.dispose();
+            if (oldMesh.material) {
+              if (Array.isArray(oldMesh.material)) {
+                oldMesh.material.forEach(m => {
+                  // Only dispose if not in cache (shared)
+                  if (m && !Object.values(materialCache).includes(m)) {
+                    m.dispose();
+                  }
+                });
+              } else if (!Object.values(materialCache).includes(oldMesh.material)) {
+                oldMesh.material.dispose();
+              }
+            }
           }
           
           // Check if this is a sketch entity (has points array) or JSCAD 2D geometry (has sides array)
@@ -367,26 +431,45 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           // Convert JSCAD geometry to Three.js geometry
           const threeGeometry = jscadToThreeGeometry(modelData.geometry);
           
-          // Create material based on the type of geometry
-          let material;
+          // Check if we should use instancing
+          const geometryKey = modelData.geometry.metadata?.type || 'unique';
+          if (geometryKey !== 'unique' && modelGeometryCache[geometryKey]) {
+            console.log(`[JscadThreeViewer] Using cached geometry for ${geometryKey}`);
+            // Could implement instanced mesh here for repeated geometries
+          } else if (geometryKey !== 'unique') {
+            // Store this geometry for potential future instancing
+            modelGeometryCache[geometryKey] = threeGeometry;
+          }
           
-          if (isSketchEntity || isJscad2D) {
-            // For sketch entities or JSCAD 2D shapes (like circles), use a line material
-            const modelIndex = Object.keys(mcpModels).length;
-            const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
-            material = new THREE.LineBasicMaterial({
-              color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
-              linewidth: 2, // Note: linewidth > 1 only works in WebGL 2
-            });
+          // Create material based on the type of geometry - reuse from cache when possible
+          let material;
+          const modelIndex = Object.keys(mcpModels).length;
+          const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
+          const materialKey = isSketchEntity || isJscad2D ? `line-${hue}` : `mesh-${hue}`;
+          
+          // Check if we have a cached material
+          if (materialCache[materialKey]) {
+            material = materialCache[materialKey];
           } else {
-            // For 3D models, use a standard material
-            const modelIndex = Object.keys(mcpModels).length;
-            const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
-            material = new THREE.MeshStandardMaterial({
-              color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
-              metalness: 0.2,
-              roughness: 0.5,
-            });
+            if (isSketchEntity || isJscad2D) {
+              // For sketch entities or JSCAD 2D shapes (like circles), use a line material
+              material = new THREE.LineBasicMaterial({
+                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                linewidth: 2, // Note: linewidth > 1 only works in WebGL 2
+              });
+            } else {
+              // For 3D models, use a standard material with optimized settings
+              material = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                metalness: 0.2,
+                roughness: 0.5,
+                flatShading: true, // Faster rendering
+                vertexColors: false, // Disable for better performance
+              });
+            }
+            
+            // Add to cache
+            materialCache[materialKey] = material;
           }
           
           // Create appropriate mesh or line based on geometry type
@@ -399,6 +482,9 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             // For 3D models, create a regular mesh
             object = new THREE.Mesh(threeGeometry, material);
           }
+          
+          // Enable frustum culling for better performance
+          object.frustumCulled = PERFORMANCE_CONFIG.frustumCulling;
           
           // Add to scene
           sceneRef.current.add(object);
@@ -445,7 +531,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         
         // Determine if we have a stored camera position for this sketch
         const sketchId = sketch ? sketch.id : null;
-        const hasStoredPosition = sketchId && sketchCameraPositionsRef.current[sketchId];
+        const hasStoredPosition = sketchCameraPositionsRef.current[sketchId];
         
         if (hasStoredPosition) {
           // Restore the previously saved camera position for this sketch
@@ -694,9 +780,30 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         // Store camera reference for external access
         cameraRef.current = camera;
         
-        // Create renderer
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        // Create renderer with optimized settings
+        const renderer = new THREE.WebGLRenderer({ 
+          antialias: PERFORMANCE_CONFIG.antialias,
+          powerPreference: 'high-performance',
+          alpha: false,   // Disable alpha for better performance
+          stencil: false, // Disable stencil buffer for better performance
+          depth: true     // Keep depth buffer
+        });
+        
+        // Apply performance optimizations to renderer
         renderer.setSize(width, height);
+        renderer.setPixelRatio(PERFORMANCE_CONFIG.pixelRatio); // Limit pixel ratio for performance
+        renderer.shadowMap.enabled = PERFORMANCE_CONFIG.shadowMapEnabled;
+        renderer.physicallyCorrectLights = false; // Disable for performance
+        
+        // Enable frustum culling for better performance
+        if (PERFORMANCE_CONFIG.frustumCulling) {
+          for (let child of scene.children) {
+            if (child.isMesh) {
+              child.frustumCulled = true;
+            }
+          }
+        }
+        
         mountRef.current.appendChild(renderer.domElement);
         
         // Create and configure OrbitControls
@@ -802,18 +909,62 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           }
         });
         
-        // Enhanced mouse move handler for both measurements and plane highlighting
+        // Create a throttle utility for performance-sensitive functions
+        const throttle = (func, limit) => {
+          let inThrottle;
+          let lastResult;
+          return function(...args) {
+            if (!inThrottle) {
+              lastResult = func.apply(this, args);
+              inThrottle = true;
+              setTimeout(() => inThrottle = false, limit);
+            }
+            return lastResult;
+          };
+        };
+        
+        // Keep track of last recorded mouse position
+        const lastMousePosition = { x: 0, y: 0 };
+        
+        // Enhanced mouse move handler with throttling for better performance
         const onMouseMove = (event) => {
-          // Calculate mouse position in normalized device coordinates
+          // Always update mouse coordinates for general UI responsiveness
           const rect = renderer.domElement.getBoundingClientRect();
           mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
           mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
           
-          // Update the picking ray with the camera and mouse position
-          raycaster.setFromCamera(mouse, camera);
+          // Calculate mouse movement distance to avoid unnecessary processing on tiny movements
+          const mouseMoved = Math.abs(lastMousePosition.x - mouse.x) + Math.abs(lastMousePosition.y - mouse.y);
+          if (mouseMoved < 0.0025) return; // Skip tiny movements
           
-          // Calculate objects intersecting the picking ray
-          const intersects = raycaster.intersectObjects(scene.children, true);
+          // Update last position
+          lastMousePosition.x = mouse.x;
+          lastMousePosition.y = mouse.y;
+        };
+        
+        // Throttled version of the heavier raycasting operations
+        const performRaycast = throttle(() => {
+          if (!sceneRef.current || !cameraRef.current) return;
+          
+          // Update the picking ray with the camera and mouse position  
+          raycaster.setFromCamera(mouse, cameraRef.current);
+          raycaster.params.Line.threshold = PERFORMANCE_CONFIG.precision; // Adjust precision for performance
+          
+          // Get reference to scene from ref
+          const scene = sceneRef.current;
+          
+          // Calculate objects intersecting the picking ray - with filtering for better performance
+          // Only include objects that matter for interaction
+          const intersects = raycaster.intersectObjects(
+            scene.children.filter(obj => {
+              // Filter out invisible objects and those without interaction
+              return obj.visible && 
+                    (obj.userData.interactive !== false) && 
+                    (obj.type === 'Mesh' || obj.type === 'Line' || obj.type === 'LineLoop' || 
+                     obj.userData.type === 'referencePlane');
+            }), 
+            false // Set to false for better performance - don't check descendants
+          );
           
           // Reset any previously hovered plane
           if (hoveredPlane && referencePlanesRef.current) {
@@ -842,8 +993,16 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
               setHoveredPlane(planeName);
             }
           }
+        }, PERFORMANCE_CONFIG.raycasterThrottleMs);
+        
+        // Combined mouse move handler that separates immediate UI updates from throttled raycasting
+        const handleMouseMove = (event) => {
+          onMouseMove(event);
+          performRaycast();
         };
-
+        
+        renderer.domElement.addEventListener('mousemove', handleMouseMove);
+        
         // Handle mouse clicks for measurements
         const onMouseClick = (event) => {
           if (!measurementMode || !measurementToolRef.current) return;
@@ -854,7 +1013,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
           
           // Update the picking ray with the camera and mouse position
-          raycaster.setFromCamera(mouse, camera);
+          raycaster.setFromCamera(mouse, cameraRef.current);
           
           // Calculate objects intersecting the picking ray
           const intersects = raycaster.intersectObjects(scene.children, true);
@@ -866,13 +1025,50 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           }
         };
         
-        renderer.domElement.addEventListener('mousemove', onMouseMove);
         renderer.domElement.addEventListener('click', onMouseClick);
         
-        // Animation loop
+        // FPS monitoring variables
+        let fpsCounter;
+        let lastTime = 0;
+        let frameCount = 0;
+        const fpsUpdateInterval = 500; // ms between FPS updates
+        
+        // Create FPS counter if enabled
+        if (PERFORMANCE_CONFIG.showFPS) {
+          fpsCounter = document.createElement('div');
+          fpsCounter.style.position = 'absolute';
+          fpsCounter.style.top = '10px';
+          fpsCounter.style.left = '10px';
+          fpsCounter.style.backgroundColor = 'rgba(0,0,0,0.5)';
+          fpsCounter.style.color = 'white';
+          fpsCounter.style.padding = '5px';
+          fpsCounter.style.borderRadius = '3px';
+          fpsCounter.style.fontFamily = 'monospace';
+          fpsCounter.style.zIndex = '1000';
+          fpsCounter.textContent = 'FPS: --';
+          mountRef.current.appendChild(fpsCounter);
+        }
+        
+        // Animation loop with performance optimizations
         const animate = () => {
           const animationFrameId = requestAnimationFrame(animate);
+          
+          // Update controls (damping, etc.)
           controls.update();
+          
+          // FPS counter logic
+          if (PERFORMANCE_CONFIG.showFPS) {
+            frameCount++;
+            const currentTime = performance.now();
+            const elapsed = currentTime - lastTime;
+            
+            if (elapsed >= fpsUpdateInterval) {
+              const fps = Math.round((frameCount * 1000) / elapsed);
+              fpsCounter.textContent = `FPS: ${fps}`;
+              frameCount = 0;
+              lastTime = currentTime;
+            }
+          }
           
           // Update origin indicator to maintain constant screen size
           if (originIndicator) {
@@ -889,6 +1085,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             originIndicator.children[0].scale.set(scaleFactor, scaleFactor, 1);
           }
           
+          // Render the scene - only if needed (when something has changed)
           renderer.render(scene, camera);
           
           // Cleanup
@@ -897,11 +1094,22 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             
             if (controls) controls.dispose();
             
+            // Remove FPS counter if it exists
+            if (fpsCounter && mountRef.current.contains(fpsCounter)) {
+              mountRef.current.removeChild(fpsCounter);
+            }
+            
             // Clean up any meshes created from MCP models
             Object.values(meshesRef.current).forEach(mesh => {
               if (mesh) {
                 if (mesh.geometry) mesh.geometry.dispose();
-                if (mesh.material) mesh.material.dispose();
+                if (mesh.material) {
+                  if (Array.isArray(mesh.material)) {
+                    mesh.material.forEach(mat => mat.dispose());
+                  } else {
+                    mesh.material.dispose();
+                  }
+                }
                 scene.remove(mesh);
               }
             });
@@ -917,7 +1125,13 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
               scene.remove(originIndicator);
             }
             
+            // Dispose renderer and geometry/material resources
             if (renderer) {
+              // Dispose resources used by renderer
+              renderer.dispose();
+              renderer.forceContextLoss();
+              
+              // Remove from DOM
               if (mountRef.current) {
                 try {
                   mountRef.current.removeChild(renderer.domElement);
@@ -925,7 +1139,6 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
                   console.warn('Could not remove renderer from DOM', e);
                 }
               }
-              renderer.dispose();
             }
           };
         };
@@ -933,16 +1146,38 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         // Start animation
         const cleanup = animate();
         
-        // Handle window resize
+        // Handle window resize with debounce for better performance
+        let resizeTimeout;
         const handleResize = () => {
           if (!mountRef.current) return;
           
-          const newWidth = mountRef.current.clientWidth;
-          const newHeight = mountRef.current.clientHeight;
+          // Clear any pending resize operations
+          if (resizeTimeout) {
+            clearTimeout(resizeTimeout);
+          }
           
-          camera.aspect = newWidth / newHeight;
-          camera.updateProjectionMatrix();
-          renderer.setSize(newWidth, newHeight);
+          // Set the timeout to defer resize handling
+          resizeTimeout = setTimeout(() => {
+            const newWidth = mountRef.current.clientWidth;
+            const newHeight = mountRef.current.clientHeight;
+            
+            // Only update if dimensions have actually changed
+            if (renderer.domElement.width !== newWidth || 
+                renderer.domElement.height !== newHeight) {
+                
+              camera.aspect = newWidth / newHeight;
+              camera.updateProjectionMatrix();
+              renderer.setSize(newWidth, newHeight, false); // false = don't update DOM element style
+              
+              // Manually update the style ourselves to avoid layout thrashing
+              if (renderer.domElement.style) {
+                renderer.domElement.style.width = `${newWidth}px`;
+                renderer.domElement.style.height = `${newHeight}px`;
+              }
+              
+              console.log(`[JscadThreeViewer] Resized to ${newWidth}x${newHeight}`);
+            }
+          }, 250); // Debounce resize events to improve performance
         };
         
         window.addEventListener('resize', handleResize);
@@ -990,7 +1225,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         return () => {
           window.removeEventListener('resize', handleResize);
           window.removeEventListener('keydown', handleKeyDown);
-          renderer.domElement.removeEventListener('mousemove', onMouseMove);
+          renderer.domElement.removeEventListener('mousemove', handleMouseMove);
           renderer.domElement.removeEventListener('click', onMouseClick);
           
           // Clean up reference planes

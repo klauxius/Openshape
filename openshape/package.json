@@ -6,15 +6,20 @@
     "dev": "next dev",
     "dev:turbo": "next dev --turbopack",
     "build": "next build",
+    "export": "next build && next export",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron-dev": "concurrently \"next dev -p 3003\" \"wait-on http://localhost:3003 && electron ..\"",
+    "electron-pack": "npm run export && cd .. && electron-builder"
   },
   "dependencies": {
     "@jscad/modeling": "^2.12.5",
     "@jscad/obj-serializer": "^2.1.20",
     "@jscad/regl-renderer": "^2.5.0",
     "@jscad/stl-serializer": "^2.1.1",
-    "@react-three/fiber": "^9.1.0",
+    "@react-three/fiber": "^8.15.12",
+    "electron-is-dev": "^2.0.0",
+    "electron-serve": "^1.2.0",
     "jscad-fiber": "^0.0.77",
     "lucide-react": "^0.356.0",
     "next": "15.2.3",
@@ -29,9 +34,11 @@
     "@types/react-dom": "^18",
     "@types/three": "^0.174.0",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^8.2.2",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^8.0.3"
   }
 }

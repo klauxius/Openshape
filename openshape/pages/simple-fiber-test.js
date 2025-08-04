@@ -8,15 +8,15 @@ const ThreeOrbitControls = dynamic(
   { ssr: false }
 );
 
-// Import jscad-fiber components and functions dynamically
-const Cube = dynamic(() => import('jscad-fiber').then(mod => mod.Cube), { ssr: false });
-const createJSCADRenderer = dynamic(() => 
-  import('jscad-fiber').then(mod => {
-    console.log('Loaded jscad-fiber exports:', Object.keys(mod));
-    return mod.createJSCADRenderer;
-  }), 
-  { ssr: false }
-);
+// Import jscad-fiber components and functions dynamically - TEMPORARILY DISABLED
+// const Cube = dynamic(() => import('jscad-fiber').then(mod => mod.Cube), { ssr: false });
+// const createJSCADRenderer = dynamic(() => 
+//   import('jscad-fiber').then(mod => {
+//     console.log('Loaded jscad-fiber exports:', Object.keys(mod));
+//     return mod.createJSCADRenderer;
+//   }), 
+//   { ssr: false }
+// );
 
 // Import jscad modeling library
 const JSCADModeling = dynamic(() => 
@@ -60,8 +60,26 @@ function ErrorBoundary({ children, fallback }) {
   return children;
 }
 
-// A proper implementation of JSCadView following the source code directly
+// A proper implementation of JSCadView following the source code directly - TEMPORARILY DISABLED
 const CustomJSCadView = ({ children }) => {
+  return (
+    <div style={{ 
+      width: '100%', 
+      height: '100%', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      backgroundColor: '#f5f5f5',
+      border: '2px dashed #ccc',
+      fontSize: '14px',
+      color: '#666'
+    }}>
+      JSCAD Fiber Test - Temporarily disabled for build
+    </div>
+  );
+  
+  // ORIGINAL CODE TEMPORARILY COMMENTED OUT
+  /*
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
   const rendererRef = useRef(null);
@@ -246,6 +264,7 @@ const CustomJSCadView = ({ children }) => {
       }}
     />
   );
+  */
 };
 
 export default function SimpleFiberTest() {

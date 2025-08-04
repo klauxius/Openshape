@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 
-// Import JsCadView with dynamic import
-const JsCadView = dynamic(
-  () => import('jscad-fiber').then((mod) => mod.JsCadView),
-  { ssr: false }
-)
+// Import JsCadView with dynamic import - temporarily disable to fix build
+// const JsCadView = dynamic(
+//   () => import('jscad-fiber/three').then((mod) => mod.JsCadView),
+//   { ssr: false }
+// )
 
 // This component will parse JSCAD code and render it
 const JSCADViewer = ({ code }) => {
@@ -44,11 +44,16 @@ const JSCADViewer = ({ code }) => {
 
   return (
     <div style={{ width: '100%', height: '500px', position: 'relative' }}>
-      {geometryComponent && (
+      {/* Temporarily disabled for build fix */}
+      {/* {geometryComponent && (
         <JsCadView>
           {geometryComponent}
         </JsCadView>
-      )}
+      )} */}
+      
+      <div style={{ padding: '20px', textAlign: 'center' }}>
+        JSCAD Viewer - Temporarily disabled for build
+      </div>
       
       {error && (
         <div style={{ 

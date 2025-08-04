@@ -5,6 +5,7 @@ import mcpClient from './mcpClient';
 import * as jscad from '@jscad/modeling';
 import partsLibrary from './partsLibrary';
 import CADOperations from './cadOperations';
+import designHistory from './designHistory';
 
 // Model store for managing 3D models 
 export const modelStore = {
@@ -118,6 +119,127 @@ export { notifyModelChanged };
 /**
  * Initialize and register all MCP tools
  */
+/**
+ * Register tools for design history and parametric iteration
+ */
+const registerDesignHistoryTools = () => {
+  // Get Design Context tool for AI understanding
+  mcpClient.registerTool({
+    name: 'get_design_context',
+    description: 'Gets the current design context including history, intent, and parameters for AI understanding',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    },
+    execute: async (params) => {
+      console.log('Getting design context for AI');
+      const context = designHistory.getDesignContext();
+      
+      return {
+        success: true,
+        message: 'Design context retrieved successfully',
+        context
+      };
+    }
+  });
+
+  // Update Parameter tool for AI-driven iteration
+  mcpClient.registerTool({
+    name: 'update_operation_parameters',
+    description: 'Updates parameters of a previous operation to iterate on the design',
+    parameters: {
+      type: 'object',
+      properties: {
+        operationId: {
+          type: 'string',
+          description: 'ID of the operation to update'
+        },
+        parameters: {
+          type: 'object',
+          description: 'New parameter values to apply'
+        },
+        intent: {
+          type: 'string',
+          description: 'Reason for the parameter change'
+        }
+      },
+      required: ['operationId', 'parameters']
+    },
+    execute: async (params) => {
+      console.log('Updating operation parameters:', params);
+      
+      try {
+        const operation = designHistory.updateOperationParameters(
+          params.operationId, 
+          params.parameters
+        );
+        
+        // Record the intent if provided
+        if (params.intent) {
+          designHistory.designIntent[params.operationId].intent += ` | Updated: ${params.intent}`;
+        }
+        
+        return {
+          success: true,
+          message: `Updated parameters for operation ${params.operationId}`,
+          operation
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Analyze Design Evolution tool
+  mcpClient.registerTool({
+    name: 'analyze_design_evolution',
+    description: 'Analyzes how design parameters have evolved over time to suggest improvements',
+    parameters: {
+      type: 'object',
+      properties: {
+        parameterName: {
+          type: 'string',
+          description: 'Specific parameter to analyze (optional)'
+        }
+      },
+      required: []
+    },
+    execute: async (params) => {
+      console.log('Analyzing design evolution:', params);
+      
+      if (params.parameterName) {
+        const evolution = designHistory.getParameterEvolution(params.parameterName);
+        return {
+          success: true,
+          message: `Analyzed evolution of parameter: ${params.parameterName}`,
+          evolution
+        };
+      } else {
+        const context = designHistory.getDesignContext();
+        const patterns = {
+          totalOperations: context.totalOperations,
+          designGoals: context.designGoals,
+          recentTrends: context.recentIntents.slice(-5),
+          operationTypes: designHistory.getHistory().reduce((acc, op) => {
+            acc[op.type] = (acc[op.type] || 0) + 1;
+            return acc;
+          }, {})
+        };
+        
+        return {
+          success: true,
+          message: 'Analyzed overall design evolution patterns',
+          patterns
+        };
+      }
+    }
+  });
+};
+
 const initializeTools = () => {
   // Register common CAD operation tools
   registerShapeCreationTools();
@@ -126,6 +248,7 @@ const initializeTools = () => {
   registerUtilityTools();
   registerSketchingTools(); // Register 2D sketching tools
   registerCADOperationsTools(); // Register new structured CAD operations
+  registerDesignHistoryTools(); // Register AI-driven parametric design tools
 };
 
 /**
@@ -168,8 +291,24 @@ const registerShapeCreationTools = () => {
     },
     execute: async (params) => {
       console.log('Creating cube with params:', params);
+      
+      // Record design intent in history
+      const intent = `Create a cube with dimensions ${params.size || params.width}x${params.size || params.height}x${params.size || params.depth}`;
+      const operationId = designHistory.recordOperation(
+        { toolName: 'create_cube', type: 'primitive_creation', ...params },
+        intent,
+        params
+      );
+      
       // Use the partsLibrary instead of duplicating code
-      return partsLibrary.createCube(params);
+      const result = partsLibrary.createCube(params);
+      
+      // Update history with result
+      if (result && !result.error) {
+        designHistory.markAsRegenerated(operationId, result);
+      }
+      
+      return result;
     }
   });
 
@@ -208,8 +347,24 @@ const registerShapeCreationTools = () => {
     },
     execute: async (params) => {
       console.log('Creating cylinder with params:', params);
+      
+      // Record design intent in history
+      const intent = `Create a cylinder with radius ${params.radius} and height ${params.height}`;
+      const operationId = designHistory.recordOperation(
+        { toolName: 'create_cylinder', type: 'primitive_creation', ...params },
+        intent,
+        params
+      );
+      
       // Use the partsLibrary instead of duplicating code
-      return partsLibrary.createCylinder(params);
+      const result = partsLibrary.createCylinder(params);
+      
+      // Update history with result
+      if (result && !result.error) {
+        designHistory.markAsRegenerated(operationId, result);
+      }
+      
+      return result;
     }
   });
 
@@ -244,8 +399,24 @@ const registerShapeCreationTools = () => {
     },
     execute: async (params) => {
       console.log('Creating sphere with params:', params);
+      
+      // Record design intent in history
+      const intent = `Create a sphere with radius ${params.radius}`;
+      const operationId = designHistory.recordOperation(
+        { toolName: 'create_sphere', type: 'primitive_creation', ...params },
+        intent,
+        params
+      );
+      
       // Use the partsLibrary instead of duplicating code
-      return partsLibrary.createSphere(params);
+      const result = partsLibrary.createSphere(params);
+      
+      // Update history with result
+      if (result && !result.error) {
+        designHistory.markAsRegenerated(operationId, result);
+      }
+      
+      return result;
     }
   });
 

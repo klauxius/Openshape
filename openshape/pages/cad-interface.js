@@ -34,6 +34,7 @@ import {
   Bot,
   Terminal as TerminalIcon,
   MessageSquare,
+  History,
 } from "lucide-react"
 import { useUnits } from '../contexts/UnitContext'
 import initializeTools from '../lib/mcpTools';
@@ -95,6 +96,11 @@ const CodeTerminal = dynamic(() => import('../components/CodeTerminal'), {
   ssr: false,
 })
 
+// Import the Design History Panel component
+const DesignHistoryPanel = dynamic(() => import('../components/DesignHistoryPanel'), {
+  ssr: false,
+})
+
 export default function CadInterface() {
   const [mounted, setMounted] = useState(false)
   const [expandedFeatures, setExpandedFeatures] = useState(true)
@@ -118,6 +124,7 @@ export default function CadInterface() {
   const [selectedPartType, setSelectedPartType] = useState(null);
   const [partParameters, setPartParameters] = useState({});
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
   const viewerRef = useRef(null);
 
   // Fake data for the UI mockup
@@ -264,6 +271,10 @@ export default function CadInterface() {
 
   const toggleAIAssistant = () => {
     setIsAIAssistantOpen(!isAIAssistantOpen)
+  }
+
+  const toggleHistoryPanel = () => {
+    setIsHistoryPanelOpen(!isHistoryPanelOpen)
   }
 
   const handleCreateSketch = () => {
@@ -509,6 +520,17 @@ export default function CadInterface() {
             >
               <MessageSquare size={16} />
             </button>
+
+            {/* Design History button */}
+            <button 
+              className={`flex items-center justify-center w-8 h-8 mx-0.5 rounded ${
+                isHistoryPanelOpen ? 'bg-purple-100 text-purple-600' : 'text-gray-700 hover:bg-gray-100'
+              }`}
+              title="Design History"
+              onClick={toggleHistoryPanel}
+            >
+              <History size={16} />
+            </button>
           </div>
         </header>
 
@@ -659,6 +681,16 @@ export default function CadInterface() {
                 isOpen={isAIAssistantOpen}
                 onToggle={toggleAIAssistant}
               />
+            )}
+
+            {/* Design History Panel */}
+            {isHistoryPanelOpen && (
+              <div className="absolute top-0 right-0 h-full z-10">
+                <DesignHistoryPanel 
+                  isOpen={isHistoryPanelOpen}
+                  onToggle={toggleHistoryPanel}
+                />
+              </div>
             )}
 
             {/* Coordinate system indicator */}

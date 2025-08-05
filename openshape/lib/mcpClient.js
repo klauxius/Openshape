@@ -50,7 +50,7 @@ class MCPClient {
   }
 
   /**
-   * Sends a message to Anthropic and handles tool calling
+   * Sends a message to Anthropic and handles tool calling with chaining support
    * @param {string} message - The user's message
    * @param {Array} conversation - The conversation history
    * @returns {Promise<Object>} - Anthropic's response
@@ -100,7 +100,7 @@ class MCPClient {
       const anthropicRequest = {
         model: this.modelName,
         messages: formattedMessages,
-        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications. This enables true parametric design workflows where users can say things like 'make it taller' or 'add more detail' and you can understand and modify the appropriate parameters.",
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications. This enables true parametric design workflows where users can say things like 'make it taller' or 'add more detail' and you can understand and modify the appropriate parameters.\n\nIMPORTANT: You can chain multiple tool calls together to accomplish complex tasks. For example, if asked to 'delete a model', you should first list the models to see what's available, then delete the appropriate one. Think step by step and use tools as needed to complete the user's request.",
         max_tokens: 4000,
         temperature: 0.7,
         tools: this.getToolDefinitions()
@@ -161,6 +161,94 @@ class MCPClient {
       return {
         role: 'assistant',
         content: `Sorry, I encountered an error while processing your request: ${error.message}`,
+        id: Date.now().toString()
+      };
+    }
+  }
+
+  /**
+   * Sends a follow-up message with tool results to continue tool chaining
+   * @param {Array} conversation - The conversation history including tool results
+   * @returns {Promise<Object>} - Anthropic's response
+   */
+  async sendFollowUpMessage(conversation = []) {
+    console.log('MCPClient.sendFollowUpMessage called with conversation length:', conversation.length);
+    
+    try {
+      // Format the conversation history for Anthropic API
+      // Filter out system messages as they should be passed as top-level system parameter
+      const formattedMessages = conversation
+        .filter(msg => msg.role !== 'system')
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+      
+      // Prepare the Anthropic API request
+      const anthropicRequest = {
+        model: this.modelName,
+        messages: formattedMessages,
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications. This enables true parametric design workflows where users can say things like 'make it taller' or 'add more detail' and you can understand and modify the appropriate parameters.\n\nIMPORTANT: You can chain multiple tool calls together to accomplish complex tasks. For example, if asked to 'delete a model', you should first list the models to see what's available, then delete the appropriate one. Think step by step and use tools as needed to complete the user's request.",
+        max_tokens: 4000,
+        temperature: 0.7,
+        tools: this.getToolDefinitions()
+      };
+      
+      console.log('Sending follow-up request via proxy API route:', this.apiEndpoint);
+      
+      // Make the API call via our proxy route
+      const response = await fetch(this.apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(anthropicRequest)
+      });
+      
+      // Handle API errors
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Anthropic API error:', errorText);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+      
+      // Parse the response
+      const anthropicResponse = await response.json();
+      console.log('Anthropic follow-up response:', anthropicResponse);
+      
+      // Extract tool calls if any
+      const toolCalls = [];
+      const responseContent = anthropicResponse.content || [];
+      console.log('Follow-up response content:', responseContent);
+      
+      // Process content blocks for text and tool calls
+      let textContent = '';
+      
+      responseContent.forEach(block => {
+        if (block.type === 'text') {
+          textContent += block.text;
+        } else if (block.type === 'tool_use') {
+          toolCalls.push({
+            name: block.name,
+            input: block.input
+          });
+        }
+      });
+      
+      // Return the formatted response
+      const finalResponse = {
+        role: 'assistant',
+        content: textContent,
+        toolCalls: toolCalls,
+        id: anthropicResponse.id
+      };
+      console.log('Final follow-up response being returned:', finalResponse);
+      return finalResponse;
+    } catch (error) {
+      console.error('Error processing follow-up message:', error);
+      return {
+        role: 'assistant',
+        content: `Sorry, I encountered an error while processing the follow-up: ${error.message}`,
         id: Date.now().toString()
       };
     }

@@ -55,7 +55,7 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     for (const toolCall of toolCalls) {
       try {
         // Format parameters to be more readable
-        const formattedParams = JSON.stringify(toolCall.parameters, null, 2);
+        const formattedParams = JSON.stringify(toolCall.input || toolCall.parameters, null, 2);
         
         // Add a system message showing the tool call
         setMessages(prev => [
@@ -111,6 +111,110 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     }
   };
 
+  // Handle tool chaining for complex multi-step operations
+  const handleToolChaining = async (initialToolCalls) => {
+    let currentToolCalls = initialToolCalls;
+    let chainCount = 0;
+    const maxChainLength = 10; // Prevent infinite loops
+    let conversationHistory = [...messages]; // Start with current messages
+    
+    while (currentToolCalls && currentToolCalls.length > 0 && chainCount < maxChainLength) {
+      console.log(`Tool chain iteration ${chainCount + 1}, executing ${currentToolCalls.length} tools`);
+      
+      // Execute the current batch of tool calls and collect results
+      for (const toolCall of currentToolCalls) {
+        try {
+          // Format parameters to be more readable
+          const formattedParams = JSON.stringify(toolCall.input || toolCall.parameters, null, 2);
+          
+          // Add tool call to conversation history
+          const toolCallMessage = { 
+            id: generateUniqueId(), 
+            role: 'system', 
+            type: 'tool_call',
+            content: `Executing tool: ${toolCall.name}`,
+            toolName: toolCall.name,
+            parameters: formattedParams
+          };
+          conversationHistory.push(toolCallMessage);
+          
+          // Update UI
+          setMessages(prev => [...prev, toolCallMessage]);
+          
+          // Execute the tool call
+          const result = await mcpClient.executeToolCall(toolCall);
+          
+          // Add the result to conversation history
+          if (result.error) {
+            const errorMessage = { 
+              id: generateUniqueId(), 
+              role: 'system', 
+              type: 'error',
+              content: `Error: ${result.error}`
+            };
+            conversationHistory.push(errorMessage);
+            setMessages(prev => [...prev, errorMessage]);
+          } else {
+            const successMessage = result.result?.message || 'Tool executed successfully';
+            const successMsg = { 
+              id: generateUniqueId(), 
+              role: 'system', 
+              type: 'success',
+              content: successMessage
+            };
+            conversationHistory.push(successMsg);
+            setMessages(prev => [...prev, successMsg]);
+          }
+        } catch (error) {
+          console.error('Error executing tool call:', error);
+          const errorMessage = { 
+            id: generateUniqueId(), 
+            role: 'system', 
+            type: 'error',
+            content: `Error executing tool: ${error.message}`
+          };
+          conversationHistory.push(errorMessage);
+          setMessages(prev => [...prev, errorMessage]);
+        }
+      }
+      
+      // Ask the agent if it needs to make more tool calls
+      const followUpResponse = await mcpClient.sendFollowUpMessage(conversationHistory);
+      
+      // Add the follow-up response to conversation history
+      if (followUpResponse.content) {
+        const assistantMessage = { 
+          id: generateUniqueId(), 
+          role: 'assistant', 
+          content: followUpResponse.content
+        };
+        conversationHistory.push(assistantMessage);
+        setMessages(prev => [...prev, assistantMessage]);
+      }
+      
+      // Check if there are more tool calls to execute
+      currentToolCalls = followUpResponse.toolCalls || [];
+      chainCount++;
+      
+      // If no more tool calls, break the loop
+      if (!currentToolCalls || currentToolCalls.length === 0) {
+        console.log('Tool chaining complete - no more tool calls needed');
+        break;
+      }
+    }
+    
+    if (chainCount >= maxChainLength) {
+      console.warn('Tool chaining stopped due to maximum chain length reached');
+      const warningMessage = { 
+        id: generateUniqueId(), 
+        role: 'system', 
+        type: 'warning',
+        content: 'Tool chaining stopped after maximum iterations to prevent infinite loops.'
+      };
+      setMessages(prev => [...prev, warningMessage]);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!input.trim()) return;
     
@@ -136,9 +240,9 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
         content: response.content || 'I processed your request.'
       }]);
       
-      // Execute any tool calls
+      // Execute any tool calls with chaining support
       if (response.toolCalls && response.toolCalls.length > 0) {
-        await handleToolCalls(response.toolCalls);
+        await handleToolChaining(response.toolCalls);
       }
     } catch (error) {
       console.error('Error processing message:', error);

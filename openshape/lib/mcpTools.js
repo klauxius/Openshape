@@ -177,7 +177,12 @@ const registerDesignHistoryTools = () => {
         
         // Record the intent if provided
         if (params.intent) {
-          designHistory.designIntent[params.operationId].intent += ` | Updated: ${params.intent}`;
+          if (designHistory.designIntent[params.operationId]) {
+            designHistory.designIntent[params.operationId].intent += ` | Updated: ${params.intent}`;
+          } else {
+            // This shouldn't happen after the designHistory fix, but defensive programming
+            console.warn(`DesignIntent entry missing for operation ${params.operationId}, intent not recorded`);
+          }
         }
         
         return {

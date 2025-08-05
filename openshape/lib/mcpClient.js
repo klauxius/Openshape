@@ -112,7 +112,7 @@ class MCPClient {
       const anthropicRequest = {
         model: this.modelName,
         messages: formattedMessages,
-        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications. This enables true parametric design workflows where users can say things like 'make it taller' or 'add more detail' and you can understand and modify the appropriate parameters.\n\nMULTI-STEP TASK MANAGEMENT: For complex operations that require multiple steps, use the multi-step task management tools:\n1. Use 'create_multi_step_task' to create a checklist of operations needed\n2. Execute each step using the appropriate tools\n3. Use 'complete_task_step' to mark each step as completed\n4. Use 'get_task_progress' to check overall progress\n5. Use 'fail_task_step' if a step cannot be completed\n\nThis approach ensures systematic completion of complex tasks and provides clear progress tracking. For example, when asked to 'delete a model', create a task with steps like '1. List all models in the scene', '2. Identify the model to delete', '3. Delete the specified model'.",
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nIMPORTANT: When a user asks you to create a shape, create it ONCE and then stop. Do not create multiple shapes unless explicitly requested. After creating a shape, wait for the user's next instruction.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications.\n\nFor complex operations that require multiple steps, use the multi-step task management tools:\n1. Use 'create_multi_step_task' to create a checklist of operations needed\n2. Execute each step using the appropriate tools\n3. Use 'complete_task_step' to mark each step as completed\n4. Use 'get_task_progress' to check overall progress\n5. Use 'fail_task_step' if a step cannot be completed",
         max_tokens: 4000,
         temperature: 0.7,
         tools: this.getToolDefinitions()
@@ -184,18 +184,17 @@ class MCPClient {
    * @returns {Promise<Object>} - Anthropic's response
    */
   async sendFollowUpMessage(conversation = []) {
-    console.log('MCPClient.sendFollowUpMessage called with conversation length:', conversation.length);
-    
     try {
-      // Format the conversation history for Anthropic API
-      // Convert system messages to assistant messages since Anthropic doesn't accept system role
+      console.log('MCPClient.sendFollowUpMessage called with conversation length:', conversation.length);
+      
+      // Filter and format conversation history for Anthropic
       const formattedMessages = conversation
         .filter(msg => {
-          // Keep user and assistant messages
+          // Include user and assistant messages
           if (msg.role === 'user' || msg.role === 'assistant') {
             return true;
           }
-          // Keep system messages that contain tool results (success/error messages)
+          // Include system messages that are tool results (success or error)
           if (msg.role === 'system' && (msg.type === 'success' || msg.type === 'error')) {
             return true;
           }
@@ -208,17 +207,21 @@ class MCPClient {
           content: msg.content
         }));
       
+      console.log('Formatted messages for Anthropic:', formattedMessages.length, 'messages');
+      console.log('Last 5 formatted messages:', formattedMessages.slice(-5));
+      
       // Prepare the Anthropic API request
       const anthropicRequest = {
         model: this.modelName,
         messages: formattedMessages,
-        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications. This enables true parametric design workflows where users can say things like 'make it taller' or 'add more detail' and you can understand and modify the appropriate parameters.\n\nMULTI-STEP TASK MANAGEMENT: For complex operations that require multiple steps, use the multi-step task management tools:\n1. Use 'create_multi_step_task' to create a checklist of operations needed\n2. Execute each step using the appropriate tools\n3. Use 'complete_task_step' to mark each step as completed\n4. Use 'get_task_progress' to check overall progress\n5. Use 'fail_task_step' if a step cannot be completed\n\nThis approach ensures systematic completion of complex tasks and provides clear progress tracking. For example, when asked to 'delete a model', create a task with steps like '1. List all models in the scene', '2. Identify the model to delete', '3. Delete the specified model'.",
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nIMPORTANT: When a user asks you to create a shape, create it ONCE and then stop. Do not create multiple shapes unless explicitly requested. After creating a shape, wait for the user's next instruction.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications.\n\nFor complex operations that require multiple steps, use the multi-step task management tools:\n1. Use 'create_multi_step_task' to create a checklist of operations needed\n2. Execute each step using the appropriate tools\n3. Use 'complete_task_step' to mark each step as completed\n4. Use 'get_task_progress' to check overall progress\n5. Use 'fail_task_step' if a step cannot be completed",
         max_tokens: 4000,
         temperature: 0.7,
         tools: this.getToolDefinitions()
       };
       
       console.log('Sending follow-up request via proxy API route:', this.apiEndpoint);
+      console.log('Anthropic request payload:', JSON.stringify(anthropicRequest, null, 2));
       
       // Make the API call via our proxy route
       const response = await fetch(this.apiEndpoint, {

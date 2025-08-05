@@ -133,12 +133,41 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     const maxChainLength = 10; // Prevent infinite loops
     let conversationHistory = [...messages]; // Start with current messages
     
+    // Track tool calls to detect loops
+    const toolCallHistory = [];
+    
+    console.log('Starting tool chaining with initial tool calls:', initialToolCalls);
+    console.log('Initial conversation history length:', conversationHistory.length);
+    
     while (currentToolCalls && currentToolCalls.length > 0 && chainCount < maxChainLength) {
       console.log(`Tool chain iteration ${chainCount + 1}, executing ${currentToolCalls.length} tools`);
+      console.log('Current tool calls:', currentToolCalls);
       
       // Execute the current batch of tool calls and collect results
       for (const toolCall of currentToolCalls) {
         try {
+          // Track this tool call
+          toolCallHistory.push({
+            name: toolCall.name,
+            iteration: chainCount,
+            timestamp: Date.now()
+          });
+          
+          // Check for potential loops - if the same tool is called 3 times in a row
+          const recentCalls = toolCallHistory.slice(-3);
+          if (recentCalls.length === 3 && 
+              recentCalls.every(call => call.name === toolCall.name)) {
+            console.warn('Potential tool call loop detected:', toolCall.name);
+            const warningMessage = { 
+              id: generateUniqueId(), 
+              role: 'system', 
+              type: 'warning',
+              content: `Stopping tool chaining - potential loop detected with ${toolCall.name}`
+            };
+            setMessages(prev => [...prev, warningMessage]);
+            return; // Exit the chaining
+          }
+          
           // Format parameters to be more readable
           const formattedParams = JSON.stringify(toolCall.input || toolCall.parameters, null, 2);
           
@@ -208,8 +237,15 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
         }
       }
       
+      console.log('Conversation history before follow-up request:', conversationHistory.length, 'messages');
+      console.log('Last few messages:', conversationHistory.slice(-3));
+      
       // Ask the agent if it needs to make more tool calls
       const followUpResponse = await mcpClient.sendFollowUpMessage(conversationHistory);
+      
+      console.log('Follow-up response received:', followUpResponse);
+      console.log('Follow-up response content:', followUpResponse.content);
+      console.log('Follow-up response tool calls:', followUpResponse.toolCalls);
       
       // Add the follow-up response to conversation history
       if (followUpResponse.content) {
@@ -226,9 +262,18 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
       currentToolCalls = followUpResponse.toolCalls || [];
       chainCount++;
       
+      console.log('Updated currentToolCalls:', currentToolCalls);
+      console.log('Chain count:', chainCount);
+      
       // If no more tool calls, break the loop
       if (!currentToolCalls || currentToolCalls.length === 0) {
         console.log('Tool chaining complete - no more tool calls needed');
+        break;
+      }
+      
+      // Additional safeguard: if the response is completely empty, stop chaining
+      if (!followUpResponse.content && (!followUpResponse.toolCalls || followUpResponse.toolCalls.length === 0)) {
+        console.log('Tool chaining stopped - empty response received');
         break;
       }
     }

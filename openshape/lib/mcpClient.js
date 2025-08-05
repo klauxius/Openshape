@@ -56,6 +56,13 @@ class MCPClient {
    * @returns {Promise<Object>} - Anthropic's response
    */
   async sendMessage(message, conversation = []) {
+    console.log('MCPClient.sendMessage called with:', { message, conversationLength: conversation.length });
+    console.log('Environment variables:', {
+      apiKey: this.apiKey ? 'SET' : 'NOT SET',
+      useSimulated: process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES,
+      modelName: this.modelName
+    });
+    
     if (!this.apiKey && !process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES) {
       console.warn('Anthropic API key not set and simulated responses not enabled');
       return {
@@ -69,7 +76,9 @@ class MCPClient {
       // Use simulated responses if enabled or no API key
       if (!this.apiKey || process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
         console.log('Using simulated responses for development');
-        return this.generateSimulatedResponse(message);
+        const simulatedResponse = this.generateSimulatedResponse(message);
+        console.log('Simulated response:', simulatedResponse);
+        return simulatedResponse;
       }
       
       // Format the conversation history for Anthropic API
@@ -119,6 +128,7 @@ class MCPClient {
       // Extract tool calls if any
       const toolCalls = [];
       const responseContent = anthropicResponse.content || [];
+      console.log('Response content:', responseContent);
       
       // Process content blocks for text and tool calls
       let textContent = '';
@@ -135,12 +145,14 @@ class MCPClient {
       });
       
       // Return the formatted response
-      return {
+      const finalResponse = {
         role: 'assistant',
         content: textContent,
         toolCalls: toolCalls,
         id: anthropicResponse.id
       };
+      console.log('Final response being returned:', finalResponse);
+      return finalResponse;
     } catch (error) {
       console.error('Error processing message:', error);
       return {
@@ -157,6 +169,7 @@ class MCPClient {
    * @returns {Object} - Simulated response
    */
   generateSimulatedResponse(message) {
+    console.log('Generating simulated response for:', message);
     // Convert to lowercase for easier pattern matching
     const lowerMessage = message.toLowerCase();
     
@@ -665,6 +678,44 @@ class MCPClient {
       return {
         content: `I'll extrude the sketch to a height of ${height}mm.`,
         systemMessage: "The system will prompt for extrusion height and extrude the current sketch."
+      };
+    }
+    // Special case for "make a circle" - this is a common pattern
+    else if (lowerMessage.includes('make') && lowerMessage.includes('circle')) {
+      let radius = 5;
+      let center = [0, 0];
+      let extrudeHeight = 0;
+      
+      // Extract radius if provided
+      const radiusMatch = message.match(/radius\s*[=:]\s*(\d+(\.\d+)?)/i) || message.match(/radius\s+of\s+(\d+(\.\d+)?)/i);
+      if (radiusMatch) {
+        radius = parseFloat(radiusMatch[1]);
+      }
+      
+      // Extract center if provided
+      const centerMatch = message.match(/at\s*\[?\s*(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)\s*\]?/i);
+      if (centerMatch) {
+        center = [parseFloat(centerMatch[1]), parseFloat(centerMatch[3])];
+      }
+      
+      // Extract extrude height if provided
+      const extrudeMatch = message.match(/extrude\s*(to|by|with)?\s*(\d+(\.\d+)?)/i);
+      if (extrudeMatch) {
+        extrudeHeight = parseFloat(extrudeMatch[2]);
+      }
+      
+      return {
+        content: `I'll create a circle with radius ${radius} at [${center}].`,
+        toolCalls: [
+          {
+            name: 'create_circle',
+            parameters: {
+              radius,
+              center,
+              extrudeHeight
+            }
+          }
+        ]
       };
     }
     // Default response if no pattern matches

@@ -7,6 +7,103 @@ import partsLibrary from './partsLibrary';
 import CADOperations from './cadOperations';
 import designHistory from './designHistory';
 
+// Multi-step task management
+export const taskManager = {
+  activeTasks: {},
+  
+  // Create a new multi-step task
+  createTask(taskId, description, steps) {
+    this.activeTasks[taskId] = {
+      id: taskId,
+      description,
+      steps: steps.map((step, index) => ({
+        id: index + 1,
+        description: step,
+        completed: false,
+        result: null,
+        error: null
+      })),
+      status: 'in_progress',
+      createdAt: new Date(),
+      completedAt: null
+    };
+    return this.activeTasks[taskId];
+  },
+  
+  // Get a task by ID
+  getTask(taskId) {
+    return this.activeTasks[taskId];
+  },
+  
+  // Mark a step as completed
+  completeStep(taskId, stepId, result = null) {
+    const task = this.activeTasks[taskId];
+    if (!task) return false;
+    
+    const step = task.steps.find(s => s.id === stepId);
+    if (!step) return false;
+    
+    step.completed = true;
+    step.result = result;
+    step.completedAt = new Date();
+    
+    // Check if all steps are completed
+    if (task.steps.every(s => s.completed)) {
+      task.status = 'completed';
+      task.completedAt = new Date();
+    }
+    
+    return true;
+  },
+  
+  // Mark a step as failed
+  failStep(taskId, stepId, error) {
+    const task = this.activeTasks[taskId];
+    if (!task) return false;
+    
+    const step = task.steps.find(s => s.id === stepId);
+    if (!step) return false;
+    
+    step.error = error;
+    task.status = 'failed';
+    
+    return true;
+  },
+  
+  // Get task progress
+  getTaskProgress(taskId) {
+    const task = this.activeTasks[taskId];
+    if (!task) return null;
+    
+    const completedSteps = task.steps.filter(s => s.completed).length;
+    const totalSteps = task.steps.length;
+    
+    return {
+      taskId,
+      description: task.description,
+      status: task.status,
+      progress: {
+        completed: completedSteps,
+        total: totalSteps,
+        percentage: Math.round((completedSteps / totalSteps) * 100)
+      },
+      steps: task.steps,
+      createdAt: task.createdAt,
+      completedAt: task.completedAt
+    };
+  },
+  
+  // Clear completed tasks
+  clearCompletedTasks() {
+    Object.keys(this.activeTasks).forEach(taskId => {
+      if (this.activeTasks[taskId].status === 'completed' || 
+          this.activeTasks[taskId].status === 'failed') {
+        delete this.activeTasks[taskId];
+      }
+    });
+  }
+};
+
 // Model store for managing 3D models 
 export const modelStore = {
   models: {},
@@ -1023,6 +1120,188 @@ const registerUtilityTools = () => {
         };
       } catch (error) {
         console.error('Error setting active model:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+  
+  // Multi-step Task Management tools
+  mcpClient.registerTool({
+    name: 'create_multi_step_task',
+    description: 'Creates a new multi-step task with a checklist of operations to complete',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Unique identifier for the task'
+        },
+        description: {
+          type: 'string',
+          description: 'Description of what the task accomplishes'
+        },
+        steps: {
+          type: 'array',
+          description: 'Array of step descriptions to complete',
+          items: {
+            type: 'string'
+          }
+        }
+      },
+      required: ['taskId', 'description', 'steps']
+    },
+    execute: async (params) => {
+      try {
+        const task = taskManager.createTask(params.taskId, params.description, params.steps);
+        
+        return {
+          success: true,
+          taskId: task.id,
+          description: task.description,
+          totalSteps: task.steps.length,
+          status: task.status,
+          message: `Created multi-step task: ${task.description} with ${task.steps.length} steps`
+        };
+      } catch (error) {
+        console.error('Error creating multi-step task:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  mcpClient.registerTool({
+    name: 'get_task_progress',
+    description: 'Gets the current progress of a multi-step task',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task to check'
+        }
+      },
+      required: ['taskId']
+    },
+    execute: async (params) => {
+      try {
+        const progress = taskManager.getTaskProgress(params.taskId);
+        
+        if (!progress) {
+          throw new Error(`Task with ID ${params.taskId} not found`);
+        }
+        
+        return {
+          success: true,
+          taskId: progress.taskId,
+          description: progress.description,
+          status: progress.status,
+          progress: progress.progress,
+          steps: progress.steps,
+          message: `Task progress: ${progress.progress.completed}/${progress.progress.total} steps completed (${progress.progress.percentage}%)`
+        };
+      } catch (error) {
+        console.error('Error getting task progress:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  mcpClient.registerTool({
+    name: 'complete_task_step',
+    description: 'Marks a step in a multi-step task as completed',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task'
+        },
+        stepId: {
+          type: 'number',
+          description: 'ID of the step to mark as completed'
+        },
+        result: {
+          type: 'string',
+          description: 'Optional result or note about the completed step'
+        }
+      },
+      required: ['taskId', 'stepId']
+    },
+    execute: async (params) => {
+      try {
+        const success = taskManager.completeStep(params.taskId, params.stepId, params.result);
+        
+        if (!success) {
+          throw new Error(`Failed to complete step ${params.stepId} in task ${params.taskId}`);
+        }
+        
+        const progress = taskManager.getTaskProgress(params.taskId);
+        
+        return {
+          success: true,
+          taskId: params.taskId,
+          stepId: params.stepId,
+          status: progress.status,
+          progress: progress.progress,
+          message: `Completed step ${params.stepId}. Progress: ${progress.progress.completed}/${progress.progress.total} steps (${progress.progress.percentage}%)`
+        };
+      } catch (error) {
+        console.error('Error completing task step:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  mcpClient.registerTool({
+    name: 'fail_task_step',
+    description: 'Marks a step in a multi-step task as failed',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task'
+        },
+        stepId: {
+          type: 'number',
+          description: 'ID of the step that failed'
+        },
+        error: {
+          type: 'string',
+          description: 'Description of what went wrong'
+        }
+      },
+      required: ['taskId', 'stepId', 'error']
+    },
+    execute: async (params) => {
+      try {
+        const success = taskManager.failStep(params.taskId, params.stepId, params.error);
+        
+        if (!success) {
+          throw new Error(`Failed to mark step ${params.stepId} as failed in task ${params.taskId}`);
+        }
+        
+        return {
+          success: true,
+          taskId: params.taskId,
+          stepId: params.stepId,
+          status: 'failed',
+          message: `Marked step ${params.stepId} as failed: ${params.error}`
+        };
+      } catch (error) {
+        console.error('Error failing task step:', error);
         return {
           success: false,
           error: error.message

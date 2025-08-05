@@ -85,7 +85,22 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
             }
           ]);
         } else {
-          const successMessage = result.result?.message || 'Tool executed successfully';
+          // Create a detailed success message that includes the tool result data
+          let successMessage = result.result?.message || 'Tool executed successfully';
+          
+          // For specific tools, include additional data that the agent needs
+          if (result.result?.models) {
+            // For list_models tool, include the model details
+            const models = result.result.models;
+            const modelDetails = models.map(model => 
+              `- ${model.name || 'Unnamed'} (ID: ${model.id})`
+            ).join('\n');
+            successMessage = `${successMessage}\n\nAvailable models:\n${modelDetails}`;
+          } else if (result.result?.modelId) {
+            // For tools that return a model ID, include it
+            successMessage = `${successMessage} (Model ID: ${result.result.modelId})`;
+          }
+          
           setMessages(prev => [
             ...prev, 
             { 
@@ -155,7 +170,22 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
             conversationHistory.push(errorMessage);
             setMessages(prev => [...prev, errorMessage]);
           } else {
-            const successMessage = result.result?.message || 'Tool executed successfully';
+            // Create a detailed success message that includes the tool result data
+            let successMessage = result.result?.message || 'Tool executed successfully';
+            
+            // For specific tools, include additional data that the agent needs
+            if (result.result?.models) {
+              // For list_models tool, include the model details
+              const models = result.result.models;
+              const modelDetails = models.map(model => 
+                `- ${model.name || 'Unnamed'} (ID: ${model.id})`
+              ).join('\n');
+              successMessage = `${successMessage}\n\nAvailable models:\n${modelDetails}`;
+            } else if (result.result?.modelId) {
+              // For tools that return a model ID, include it
+              successMessage = `${successMessage} (Model ID: ${result.result.modelId})`;
+            }
+            
             const successMsg = { 
               id: generateUniqueId(), 
               role: 'system', 

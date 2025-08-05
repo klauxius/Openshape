@@ -82,9 +82,20 @@ class MCPClient {
       }
       
       // Format the conversation history for Anthropic API
-      // Filter out system messages as they should be passed as top-level system parameter
+      // Include tool results but filter out other system messages
       const formattedMessages = conversation
-        .filter(msg => msg.role !== 'system')
+        .filter(msg => {
+          // Keep user and assistant messages
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            return true;
+          }
+          // Keep system messages that contain tool results (success/error messages)
+          if (msg.role === 'system' && (msg.type === 'success' || msg.type === 'error')) {
+            return true;
+          }
+          // Filter out other system messages (tool calls, etc.)
+          return false;
+        })
         .map(msg => ({
           role: msg.role,
           content: msg.content
@@ -176,9 +187,20 @@ class MCPClient {
     
     try {
       // Format the conversation history for Anthropic API
-      // Filter out system messages as they should be passed as top-level system parameter
+      // Include tool results but filter out other system messages
       const formattedMessages = conversation
-        .filter(msg => msg.role !== 'system')
+        .filter(msg => {
+          // Keep user and assistant messages
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            return true;
+          }
+          // Keep system messages that contain tool results (success/error messages)
+          if (msg.role === 'system' && (msg.type === 'success' || msg.type === 'error')) {
+            return true;
+          }
+          // Filter out other system messages (tool calls, etc.)
+          return false;
+        })
         .map(msg => ({
           role: msg.role,
           content: msg.content

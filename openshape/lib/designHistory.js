@@ -89,7 +89,9 @@ class DesignHistoryManager {
     
     // Update parameters
     operation.parameters = { ...operation.parameters, ...newParameters };
-    this.designIntent[operationId].parameters = operation.parameters;
+    if (this.designIntent[operationId]) {
+      this.designIntent[operationId].parameters = operation.parameters;
+    }
 
     console.log(`Updating operation ${operationId} parameters:`, {
       old: oldParameters,

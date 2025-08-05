@@ -176,7 +176,7 @@ const registerDesignHistoryTools = () => {
         );
         
         // Record the intent if provided
-        if (params.intent) {
+        if (params.intent && designHistory.designIntent[params.operationId]) {
           designHistory.designIntent[params.operationId].intent += ` | Updated: ${params.intent}`;
         }
         

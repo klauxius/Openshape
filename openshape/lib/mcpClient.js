@@ -45,7 +45,7 @@ class MCPClient {
     return this.tools.map(tool => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters
+      input_schema: tool.parameters
     }));
   }
 

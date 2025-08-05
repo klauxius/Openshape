@@ -1290,8 +1290,9 @@ const registerUtilityTools = () => {
         // If autoExecute is true (default), add instructions for the agent
         if (params.autoExecute !== false) {
           result.autoExecute = true;
-          result.executionInstructions = `Task created successfully. The agent should now automatically execute each step in sequence using the appropriate CAD tools. After each step, use complete_task_step to mark it as completed.`;
+          result.executionInstructions = `Task created successfully. The agent should now automatically execute each step in sequence using the appropriate CAD tools. After each step, use complete_task_step to mark it as completed. For this table task, start with step 1: Create tabletop using create_cube, then create each leg using create_cylinder, and finally position and combine all parts.`;
           result.nextAction = 'EXECUTE_STEPS';
+          result.taskSteps = task.steps.map(step => `${step.id}: ${step.description}`).join(', ');
         }
         
         return result;

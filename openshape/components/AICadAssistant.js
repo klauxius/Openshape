@@ -162,10 +162,10 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
               id: generateUniqueId(), 
               role: 'system', 
               type: 'warning',
-              content: `Stopping tool chaining - potential loop detected with ${toolCall.name}`
+              content: `Potential loop detected with ${toolCall.name} - continuing with caution`
             };
             setMessages(prev => [...prev, warningMessage]);
-            return; // Exit the chaining
+            // Don't exit immediately - let the agent continue but log the warning
           }
           
           // Format parameters to be more readable
@@ -213,6 +213,15 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
             } else if (result.result?.modelId) {
               // For tools that return a model ID, include it
               successMessage = `${successMessage} (Model ID: ${result.result.modelId})`;
+            } else if (result.result?.nextAction) {
+              // For multi-step tasks, include the next action and execution instructions
+              successMessage = `${successMessage}\n\nNext Action: ${result.result.nextAction}`;
+              if (result.result.taskSteps) {
+                successMessage = `${successMessage}\n\nTask Steps: ${result.result.taskSteps}`;
+              }
+              if (result.result.executionInstructions) {
+                successMessage = `${successMessage}\n\nExecution Instructions: ${result.result.executionInstructions}`;
+              }
             }
             
             const successMsg = { 

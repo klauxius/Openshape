@@ -82,7 +82,7 @@ class MCPClient {
       }
       
       // Format the conversation history for Anthropic API
-      // Include tool results but filter out other system messages
+      // Convert system messages to assistant messages since Anthropic doesn't accept system role
       const formattedMessages = conversation
         .filter(msg => {
           // Keep user and assistant messages
@@ -97,7 +97,8 @@ class MCPClient {
           return false;
         })
         .map(msg => ({
-          role: msg.role,
+          // Convert system messages to assistant messages for Anthropic compatibility
+          role: msg.role === 'system' ? 'assistant' : msg.role,
           content: msg.content
         }));
       
@@ -187,7 +188,7 @@ class MCPClient {
     
     try {
       // Format the conversation history for Anthropic API
-      // Include tool results but filter out other system messages
+      // Convert system messages to assistant messages since Anthropic doesn't accept system role
       const formattedMessages = conversation
         .filter(msg => {
           // Keep user and assistant messages
@@ -202,7 +203,8 @@ class MCPClient {
           return false;
         })
         .map(msg => ({
-          role: msg.role,
+          // Convert system messages to assistant messages for Anthropic compatibility
+          role: msg.role === 'system' ? 'assistant' : msg.role,
           content: msg.content
         }));
       

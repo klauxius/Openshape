@@ -293,7 +293,7 @@ const registerShapeCreationTools = () => {
       console.log('Creating cube with params:', params);
       
       // Record design intent in history
-      const intent = `Create a cube with dimensions ${params.size || params.width}x${params.size || params.height}x${params.size || params.depth}`;
+      const intent = `Create a cube with dimensions ${params.width}x${params.height}x${params.depth}`;
       const operationId = designHistory.recordOperation(
         { toolName: 'create_cube', type: 'primitive_creation', ...params },
         intent,

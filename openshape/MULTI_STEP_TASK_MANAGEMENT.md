@@ -6,8 +6,14 @@ The multi-step task management system allows the AI agent to handle complex oper
 
 ## How It Works
 
-### 1. Task Creation
-When the agent receives a complex request, it can create a multi-step task using the `create_multi_step_task` tool:
+### 1. Task Creation and Execution
+When the agent receives a complex request (like "make a table", "create a chair", "build a house"), it automatically:
+1. Creates a multi-step task using the `create_multi_step_task` tool
+2. Immediately begins executing each step in sequence
+3. Marks each step as completed as it finishes
+4. Continues until the entire task is complete
+
+The agent will NOT stop after creating the task - it will execute all steps automatically.
 
 ```javascript
 {
@@ -102,6 +108,18 @@ If a step fails, the agent can mark it as failed:
 
 ## Example Workflows
 
+### Creating a Table (Automatic Execution)
+When a user says "make a table", the agent will:
+
+1. **Create Task**: `create_multi_step_task` with steps for table top and legs
+2. **Execute Step 1**: Create table top using `create_rectangle` with extrusion
+3. **Complete Step 1**: Mark step 1 as completed
+4. **Execute Step 2**: Create first leg using `create_cylinder`
+5. **Complete Step 2**: Mark step 2 as completed
+6. **Continue**: Repeat for remaining legs automatically
+7. **Final Assembly**: Use boolean operations to combine all parts
+8. **Complete Task**: Mark final step as completed
+
 ### Deleting a Model
 1. **Create Task**: `create_multi_step_task` with steps to list models, identify target, and delete
 2. **Execute Step 1**: Use `list_models` to see available models
@@ -119,19 +137,21 @@ If a step fails, the agent can mark it as failed:
 
 ## Benefits
 
-1. **Systematic Approach**: Ensures all steps are completed in the correct order
-2. **Progress Visibility**: Users can see exactly what has been done and what remains
-3. **Error Recovery**: Failed steps can be identified and addressed
-4. **Complex Operations**: Enables handling of multi-step operations that would be impossible in a single response
-5. **Debugging**: Clear tracking of what was attempted and what succeeded/failed
+1. **Automatic Execution**: The agent automatically executes all steps without requiring user intervention
+2. **Systematic Approach**: Ensures all steps are completed in the correct order
+3. **Progress Visibility**: Users can see exactly what has been done and what remains
+4. **Error Recovery**: Failed steps can be identified and addressed
+5. **Complex Operations**: Enables handling of multi-step operations that would be impossible in a single response
+6. **Debugging**: Clear tracking of what was attempted and what succeeded/failed
+7. **User Experience**: Users can simply say "make a table" and get a complete table without multiple back-and-forth interactions
 
 ## Usage in Practice
 
-When you ask the agent to perform a complex operation like "delete the red cube", the agent will:
+When you ask the agent to perform a complex operation like "make a table" or "delete the red cube", the agent will:
 
 1. Create a multi-step task with appropriate steps
-2. Execute each step systematically
-3. Provide clear feedback on progress
+2. Execute each step systematically without stopping
+3. Provide clear feedback on progress as it works
 4. Complete the entire operation before responding
 
-This ensures that complex operations are handled reliably and transparently. 
+This ensures that complex operations are handled reliably and transparently, with no need for multiple user interactions. 

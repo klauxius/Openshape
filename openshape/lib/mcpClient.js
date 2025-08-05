@@ -746,7 +746,12 @@ class MCPClient {
    * @returns {Promise<Object>} - Result of the tool execution
    */
   async executeToolCall(toolCall) {
-    const { name, parameters } = toolCall;
+    console.log('Received tool call:', toolCall);
+    
+    // Handle both Anthropic format (input) and standard format (parameters)
+    const { name, input, parameters } = toolCall;
+    const params = input || parameters;
+    
     const tool = this.tools.find(t => t.name === name);
     
     if (!tool) {
@@ -757,8 +762,8 @@ class MCPClient {
     }
     
     try {
-      console.log(`Executing tool ${name} with parameters:`, parameters);
-      const result = await tool.execute(parameters);
+      console.log(`Executing tool ${name} with parameters:`, params);
+      const result = await tool.execute(params);
       console.log(`Tool ${name} execution result:`, result);
       return {
         result

@@ -342,6 +342,121 @@ const registerDesignHistoryTools = () => {
   });
 };
 
+// Chain of Thought Management System
+export const chainOfThoughtManager = {
+  activeChains: {},
+  
+  // Create a new chain of thought session
+  createChain(chainId, task, initialThought = null) {
+    this.activeChains[chainId] = {
+      id: chainId,
+      task: task,
+      thoughts: [],
+      currentStep: 0,
+      status: 'active',
+      createdAt: new Date(),
+      completedAt: null
+    };
+    
+    if (initialThought) {
+      this.addThought(chainId, initialThought);
+    }
+    
+    return this.activeChains[chainId];
+  },
+  
+  // Add a thought to the chain
+  addThought(chainId, thought, stepType = 'reasoning') {
+    const chain = this.activeChains[chainId];
+    if (!chain) return false;
+    
+    const thoughtEntry = {
+      id: chain.thoughts.length + 1,
+      content: thought,
+      type: stepType, // 'reasoning', 'action', 'observation', 'decision'
+      timestamp: new Date(),
+      stepNumber: chain.currentStep + 1
+    };
+    
+    chain.thoughts.push(thoughtEntry);
+    chain.currentStep++;
+    
+    return thoughtEntry;
+  },
+  
+  // Get the current chain
+  getChain(chainId) {
+    return this.activeChains[chainId];
+  },
+  
+  // Get the current thought context
+  getCurrentContext(chainId) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return null;
+    
+    return {
+      task: chain.task,
+      currentStep: chain.currentStep,
+      recentThoughts: chain.thoughts.slice(-3), // Last 3 thoughts for context
+      totalThoughts: chain.thoughts.length
+    };
+  },
+  
+  // Complete the chain
+  completeChain(chainId, finalThought = null) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return false;
+    
+    if (finalThought) {
+      this.addThought(chainId, finalThought, 'conclusion');
+    }
+    
+    chain.status = 'completed';
+    chain.completedAt = new Date();
+    
+    return true;
+  },
+  
+  // Fail the chain
+  failChain(chainId, errorThought) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return false;
+    
+    this.addThought(chainId, errorThought, 'error');
+    chain.status = 'failed';
+    chain.completedAt = new Date();
+    
+    return true;
+  },
+  
+  // Get chain summary
+  getChainSummary(chainId) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return null;
+    
+    return {
+      id: chain.id,
+      task: chain.task,
+      status: chain.status,
+      totalThoughts: chain.thoughts.length,
+      currentStep: chain.currentStep,
+      thoughts: chain.thoughts,
+      createdAt: chain.createdAt,
+      completedAt: chain.completedAt
+    };
+  },
+  
+  // Clear completed chains
+  clearCompletedChains() {
+    Object.keys(this.activeChains).forEach(chainId => {
+      if (this.activeChains[chainId].status === 'completed' || 
+          this.activeChains[chainId].status === 'failed') {
+        delete this.activeChains[chainId];
+      }
+    });
+  }
+};
+
 const initializeTools = () => {
   // Register common CAD operation tools
   registerShapeCreationTools();
@@ -351,6 +466,7 @@ const initializeTools = () => {
   registerSketchingTools(); // Register 2D sketching tools
   registerCADOperationsTools(); // Register new structured CAD operations
   registerDesignHistoryTools(); // Register AI-driven parametric design tools
+  registerChainOfThoughtTools(); // Register chain of thought management tools
 };
 
 /**
@@ -2243,6 +2359,408 @@ const registerCADOperationsTools = () => {
           ? `Added circle with radius ${radius} to sketch` 
           : result.error
       };
+    }
+  });
+};
+
+/**
+ * Register tools for chain of thought management
+ */
+const registerChainOfThoughtTools = () => {
+  // Start Chain of Thought tool
+  mcpClient.registerTool({
+    name: 'start_chain_of_thought',
+    description: 'Starts a new chain of thought session to maintain focus on complex tasks',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'Unique identifier for the chain of thought session'
+        },
+        task: {
+          type: 'string',
+          description: 'Description of the task to focus on'
+        },
+        initialThought: {
+          type: 'string',
+          description: 'Optional initial thought or reasoning about the task'
+        }
+      },
+      required: ['chainId', 'task']
+    },
+    execute: async (params) => {
+      try {
+        const chain = chainOfThoughtManager.createChain(
+          params.chainId, 
+          params.task, 
+          params.initialThought
+        );
+        
+        return {
+          success: true,
+          chainId: chain.id,
+          task: chain.task,
+          status: chain.status,
+          message: `Started chain of thought for task: ${chain.task}`,
+          context: chainOfThoughtManager.getCurrentContext(chain.id)
+        };
+      } catch (error) {
+        console.error('Error starting chain of thought:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Add Thought tool
+  mcpClient.registerTool({
+    name: 'add_thought',
+    description: 'Adds a thought to the current chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        thought: {
+          type: 'string',
+          description: 'The thought or reasoning to add'
+        },
+        stepType: {
+          type: 'string',
+          description: 'Type of thought step',
+          enum: ['reasoning', 'action', 'observation', 'decision'],
+          default: 'reasoning'
+        }
+      },
+      required: ['chainId', 'thought']
+    },
+    execute: async (params) => {
+      try {
+        const thoughtEntry = chainOfThoughtManager.addThought(
+          params.chainId, 
+          params.thought, 
+          params.stepType
+        );
+        
+        if (!thoughtEntry) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          thoughtId: thoughtEntry.id,
+          stepNumber: thoughtEntry.stepNumber,
+          context: chainOfThoughtManager.getCurrentContext(params.chainId),
+          message: `Added thought ${thoughtEntry.id} to chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error adding thought:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Get Chain Context tool
+  mcpClient.registerTool({
+    name: 'get_chain_context',
+    description: 'Gets the current context of a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        }
+      },
+      required: ['chainId']
+    },
+    execute: async (params) => {
+      try {
+        const context = chainOfThoughtManager.getCurrentContext(params.chainId);
+        
+        if (!context) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          context: context,
+          message: `Retrieved context for chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error getting chain context:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Complete Chain tool
+  mcpClient.registerTool({
+    name: 'complete_chain_of_thought',
+    description: 'Completes a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        finalThought: {
+          type: 'string',
+          description: 'Optional final thought or conclusion'
+        }
+      },
+      required: ['chainId']
+    },
+    execute: async (params) => {
+      try {
+        const success = chainOfThoughtManager.completeChain(
+          params.chainId, 
+          params.finalThought
+        );
+        
+        if (!success) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        const summary = chainOfThoughtManager.getChainSummary(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          status: 'completed',
+          summary: summary,
+          message: `Completed chain of thought session ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error completing chain:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Fail Chain tool
+  mcpClient.registerTool({
+    name: 'fail_chain_of_thought',
+    description: 'Marks a chain of thought session as failed',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        errorThought: {
+          type: 'string',
+          description: 'Description of what went wrong or why the chain failed'
+        }
+      },
+      required: ['chainId', 'errorThought']
+    },
+    execute: async (params) => {
+      try {
+        const success = chainOfThoughtManager.failChain(
+          params.chainId, 
+          params.errorThought
+        );
+        
+        if (!success) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        const summary = chainOfThoughtManager.getChainSummary(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          status: 'failed',
+          summary: summary,
+          message: `Marked chain of thought session ${params.chainId} as failed`
+        };
+      } catch (error) {
+        console.error('Error failing chain:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Get Chain Summary tool
+  mcpClient.registerTool({
+    name: 'get_chain_summary',
+    description: 'Gets a complete summary of a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        }
+      },
+      required: ['chainId']
+    },
+    execute: async (params) => {
+      try {
+        const summary = chainOfThoughtManager.getChainSummary(params.chainId);
+        
+        if (!summary) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          summary: summary,
+          message: `Retrieved summary for chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error getting chain summary:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Chain of Thought Reasoning tool
+  mcpClient.registerTool({
+    name: 'chain_reasoning',
+    description: 'Performs structured reasoning within a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        reasoning: {
+          type: 'string',
+          description: 'The reasoning step to perform'
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'What is expected to happen after this reasoning step'
+        }
+      },
+      required: ['chainId', 'reasoning']
+    },
+    execute: async (params) => {
+      try {
+        // Add the reasoning thought
+        const thoughtEntry = chainOfThoughtManager.addThought(
+          params.chainId, 
+          params.reasoning, 
+          'reasoning'
+        );
+        
+        if (!thoughtEntry) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        // Get current context
+        const context = chainOfThoughtManager.getCurrentContext(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          thoughtId: thoughtEntry.id,
+          stepNumber: thoughtEntry.stepNumber,
+          reasoning: params.reasoning,
+          expectedOutcome: params.expectedOutcome,
+          context: context,
+          message: `Added reasoning step ${thoughtEntry.id} to chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error in chain reasoning:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Chain of Thought Decision tool
+  mcpClient.registerTool({
+    name: 'chain_decision',
+    description: 'Makes a decision within a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        decision: {
+          type: 'string',
+          description: 'The decision being made'
+        },
+        rationale: {
+          type: 'string',
+          description: 'The rationale behind the decision'
+        },
+        nextAction: {
+          type: 'string',
+          description: 'What action will be taken based on this decision'
+        }
+      },
+      required: ['chainId', 'decision']
+    },
+    execute: async (params) => {
+      try {
+        // Create a comprehensive decision thought
+        const decisionThought = `DECISION: ${params.decision}\nRationale: ${params.rationale || 'Not provided'}\nNext Action: ${params.nextAction || 'To be determined'}`;
+        
+        const thoughtEntry = chainOfThoughtManager.addThought(
+          params.chainId, 
+          decisionThought, 
+          'decision'
+        );
+        
+        if (!thoughtEntry) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        // Get current context
+        const context = chainOfThoughtManager.getCurrentContext(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          thoughtId: thoughtEntry.id,
+          stepNumber: thoughtEntry.stepNumber,
+          decision: params.decision,
+          rationale: params.rationale,
+          nextAction: params.nextAction,
+          context: context,
+          message: `Added decision step ${thoughtEntry.id} to chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error in chain decision:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
     }
   });
 };

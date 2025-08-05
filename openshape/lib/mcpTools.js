@@ -1247,7 +1247,7 @@ const registerUtilityTools = () => {
   // Multi-step Task Management tools
   mcpClient.registerTool({
     name: 'create_multi_step_task',
-    description: 'Creates a new multi-step task with a checklist of operations to complete',
+    description: 'Creates a new multi-step task with a checklist of operations to complete. The agent will automatically execute all steps in sequence.',
     parameters: {
       type: 'object',
       properties: {
@@ -1265,6 +1265,11 @@ const registerUtilityTools = () => {
           items: {
             type: 'string'
           }
+        },
+        autoExecute: {
+          type: 'boolean',
+          description: 'Whether to automatically execute all steps (default: true)',
+          default: true
         }
       },
       required: ['taskId', 'description', 'steps']
@@ -1273,7 +1278,7 @@ const registerUtilityTools = () => {
       try {
         const task = taskManager.createTask(params.taskId, params.description, params.steps);
         
-        return {
+        const result = {
           success: true,
           taskId: task.id,
           description: task.description,
@@ -1281,6 +1286,15 @@ const registerUtilityTools = () => {
           status: task.status,
           message: `Created multi-step task: ${task.description} with ${task.steps.length} steps`
         };
+
+        // If autoExecute is true (default), add instructions for the agent
+        if (params.autoExecute !== false) {
+          result.autoExecute = true;
+          result.executionInstructions = `Task created successfully. The agent should now automatically execute each step in sequence using the appropriate CAD tools. After each step, use complete_task_step to mark it as completed.`;
+          result.nextAction = 'EXECUTE_STEPS';
+        }
+        
+        return result;
       } catch (error) {
         console.error('Error creating multi-step task:', error);
         return {
@@ -1323,6 +1337,81 @@ const registerUtilityTools = () => {
         };
       } catch (error) {
         console.error('Error getting task progress:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Enhanced task execution helper tool
+  mcpClient.registerTool({
+    name: 'execute_task_step',
+    description: 'Executes a specific step in a multi-step task and provides guidance on how to complete it',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task'
+        },
+        stepId: {
+          type: 'number',
+          description: 'ID of the step to execute'
+        },
+        stepDescription: {
+          type: 'string',
+          description: 'Description of what this step should accomplish'
+        }
+      },
+      required: ['taskId', 'stepId', 'stepDescription']
+    },
+    execute: async (params) => {
+      try {
+        const task = taskManager.getTask(params.taskId);
+        if (!task) {
+          throw new Error(`Task with ID ${params.taskId} not found`);
+        }
+
+        const step = task.steps.find(s => s.id === params.stepId);
+        if (!step) {
+          throw new Error(`Step ${params.stepId} not found in task ${params.taskId}`);
+        }
+
+        // Provide guidance based on the step description
+        let guidance = '';
+        let suggestedTools = [];
+
+        if (params.stepDescription.toLowerCase().includes('tabletop') || 
+            params.stepDescription.toLowerCase().includes('table top')) {
+          guidance = 'Create a rectangular table top using create_cube with appropriate dimensions (e.g., 120x80x3cm)';
+          suggestedTools = ['create_cube'];
+        } else if (params.stepDescription.toLowerCase().includes('leg')) {
+          guidance = 'Create a cylindrical leg using create_cylinder with appropriate radius and height (e.g., radius 5cm, height 70cm)';
+          suggestedTools = ['create_cylinder'];
+        } else if (params.stepDescription.toLowerCase().includes('combine') || 
+                   params.stepDescription.toLowerCase().includes('union')) {
+          guidance = 'Combine all parts using union_shapes to create the final assembly';
+          suggestedTools = ['union_shapes', 'list_models'];
+        } else if (params.stepDescription.toLowerCase().includes('position') || 
+                   params.stepDescription.toLowerCase().includes('move')) {
+          guidance = 'Position the component using translate_shape to the correct location';
+          suggestedTools = ['translate_shape', 'list_models'];
+        }
+
+        return {
+          success: true,
+          taskId: params.taskId,
+          stepId: params.stepId,
+          stepDescription: params.stepDescription,
+          guidance: guidance,
+          suggestedTools: suggestedTools,
+          message: `Ready to execute step ${params.stepId}: ${params.stepDescription}`,
+          nextAction: 'EXECUTE_STEP_WITH_GUIDANCE'
+        };
+      } catch (error) {
+        console.error('Error executing task step:', error);
         return {
           success: false,
           error: error.message

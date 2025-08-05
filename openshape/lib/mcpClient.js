@@ -139,7 +139,7 @@ class MCPClient {
         } else if (block.type === 'tool_use') {
           toolCalls.push({
             name: block.name,
-            parameters: block.parameters
+            input: block.input
           });
         }
       });

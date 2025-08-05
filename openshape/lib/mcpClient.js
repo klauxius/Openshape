@@ -82,10 +82,13 @@ class MCPClient {
       }
       
       // Format the conversation history for Anthropic API
-      const formattedMessages = conversation.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // Filter out system messages as they should be passed as top-level system parameter
+      const formattedMessages = conversation
+        .filter(msg => msg.role !== 'system')
+        .map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
       
       // Add the current message
       formattedMessages.push({

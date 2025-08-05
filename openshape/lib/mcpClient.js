@@ -1,5 +1,5 @@
 // Model Context Protocol (MCP) Client Implementation
-// This module provides utilities for interacting with the MCP server and Claude
+// This module provides utilities for interacting with the MCP server and Anthropic
 
 /**
  * Represents a client for the Model Context Protocol
@@ -9,8 +9,8 @@ class MCPClient {
     this.tools = [];
     this.conversationId = null;
     this.apiEndpoint = '/api/claude';
-    this.apiKey = process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
-    this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-opus-20240229';
+    this.apiKey = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
+    this.modelName = process.env.NEXT_PUBLIC_ANTHROPIC_MODEL || 'claude-3-opus-20240229';
   }
 
   /**
@@ -39,7 +39,7 @@ class MCPClient {
   }
 
   /**
-   * Returns all registered tools in the format expected by Claude
+   * Returns all registered tools in the format expected by Anthropic
    */
   getToolDefinitions() {
     return this.tools.map(tool => ({
@@ -50,14 +50,14 @@ class MCPClient {
   }
 
   /**
-   * Sends a message to Claude and handles tool calling
+   * Sends a message to Anthropic and handles tool calling
    * @param {string} message - The user's message
    * @param {Array} conversation - The conversation history
-   * @returns {Promise<Object>} - Claude's response
+   * @returns {Promise<Object>} - Anthropic's response
    */
   async sendMessage(message, conversation = []) {
     if (!this.apiKey && !process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES) {
-      console.warn('Claude API key not set and simulated responses not enabled');
+      console.warn('Anthropic API key not set and simulated responses not enabled');
       return {
         role: 'assistant',
         content: 'Sorry, I cannot process your request because the API key is not configured.',
@@ -72,7 +72,7 @@ class MCPClient {
         return this.generateSimulatedResponse(message);
       }
       
-      // Format the conversation history for Claude API
+      // Format the conversation history for Anthropic API
       const formattedMessages = conversation.map(msg => ({
         role: msg.role,
         content: msg.content
@@ -84,8 +84,8 @@ class MCPClient {
         content: message
       });
       
-      // Prepare the Claude API request
-      const claudeRequest = {
+      // Prepare the Anthropic API request
+      const anthropicRequest = {
         model: this.modelName,
         messages: formattedMessages,
         system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications. This enables true parametric design workflows where users can say things like 'make it taller' or 'add more detail' and you can understand and modify the appropriate parameters.",
@@ -102,23 +102,23 @@ class MCPClient {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(claudeRequest)
+        body: JSON.stringify(anthropicRequest)
       });
       
       // Handle API errors
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Claude API error:', errorText);
+        console.error('Anthropic API error:', errorText);
         throw new Error(`API error: ${response.status} - ${errorText}`);
       }
       
       // Parse the response
-      const claudeResponse = await response.json();
-      console.log('Claude API response:', claudeResponse);
+      const anthropicResponse = await response.json();
+      console.log('Anthropic API response:', anthropicResponse);
       
       // Extract tool calls if any
       const toolCalls = [];
-      const responseContent = claudeResponse.content || [];
+      const responseContent = anthropicResponse.content || [];
       
       // Process content blocks for text and tool calls
       let textContent = '';
@@ -139,7 +139,7 @@ class MCPClient {
         role: 'assistant',
         content: textContent,
         toolCalls: toolCalls,
-        id: claudeResponse.id
+        id: anthropicResponse.id
       };
     } catch (error) {
       console.error('Error processing message:', error);
@@ -690,7 +690,7 @@ class MCPClient {
   }
 
   /**
-   * Executes a tool call from Claude
+   * Executes a tool call from Anthropic
    * @param {Object} toolCall - The tool call information
    * @returns {Promise<Object>} - Result of the tool execution
    */

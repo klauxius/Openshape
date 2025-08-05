@@ -89,7 +89,17 @@ class DesignHistoryManager {
     
     // Update parameters
     operation.parameters = { ...operation.parameters, ...newParameters };
-    if (this.designIntent[operationId]) {
+    
+    // Ensure designIntent entry exists and update parameters
+    if (!this.designIntent[operationId]) {
+      // Initialize missing designIntent entry with minimal structure
+      this.designIntent[operationId] = {
+        intent: 'No intent recorded',
+        operation: operation.toolName || operation.name || 'unknown',
+        parameters: operation.parameters,
+        dependencies: []
+      };
+    } else {
       this.designIntent[operationId].parameters = operation.parameters;
     }
 

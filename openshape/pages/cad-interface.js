@@ -101,6 +101,11 @@ const DesignHistoryPanel = dynamic(() => import('../components/DesignHistoryPane
   ssr: false,
 })
 
+// Import the Render Options Toolbar component
+const RenderOptionsToolbar = dynamic(() => import('../components/RenderOptionsToolbar'), {
+  ssr: false,
+})
+
 export default function CadInterface() {
   const [mounted, setMounted] = useState(false)
   const [expandedFeatures, setExpandedFeatures] = useState(true)
@@ -125,6 +130,11 @@ export default function CadInterface() {
   const [partParameters, setPartParameters] = useState({});
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
+  const [renderOptions, setRenderOptions] = useState({
+    wireframe: false,
+    transparency: 1.0,
+    showEdges: false
+  });
   const viewerRef = useRef(null);
 
   // Fake data for the UI mockup
@@ -665,6 +675,13 @@ export default function CadInterface() {
             <JscadThreeViewer 
               id="jscad-three-viewer"
               onModelChange={setActiveModel}
+              renderOptions={renderOptions}
+            />
+
+            {/* Render Options Toolbar */}
+            <RenderOptionsToolbar 
+              onRenderOptionsChange={setRenderOptions}
+              initialOptions={renderOptions}
             />
 
             {/* Sketch Toolbar - only shown in sketch mode */}

@@ -28,8 +28,10 @@ export const createCube = (params = {}) => {
       center: position
     });
     
-    // Add to model store
-    const modelId = modelStore.addModel(cube, name);
+    // Add to model store with default color
+    const modelId = modelStore.addModel(cube, name, {
+      color: params.color || modelStore.defaultColor
+    });
     const modelData = modelStore.getModel(modelId);
     
     // Notify the viewer
@@ -73,8 +75,10 @@ export const createSphere = (params = {}) => {
       center: position
     });
     
-    // Add to model store
-    const modelId = modelStore.addModel(sphere, name);
+    // Add to model store with default color
+    const modelId = modelStore.addModel(sphere, name, {
+      color: params.color || modelStore.defaultColor
+    });
     const modelData = modelStore.getModel(modelId);
     
     // Notify the viewer
@@ -121,8 +125,10 @@ export const createCylinder = (params = {}) => {
       center: [position[0], position[1], position[2]]
     });
     
-    // Add to model store
-    const modelId = modelStore.addModel(cylinder, name);
+    // Add to model store with default color
+    const modelId = modelStore.addModel(cylinder, name, {
+      color: params.color || modelStore.defaultColor
+    });
     const modelData = modelStore.getModel(modelId);
     
     // Notify the viewer
@@ -169,8 +175,10 @@ export const createTorus = (params = {}) => {
       center: [position[0], position[1], position[2]]
     });
     
-    // Add to model store
-    const modelId = modelStore.addModel(torus, name);
+    // Add to model store with default color
+    const modelId = modelStore.addModel(torus, name, {
+      color: params.color || modelStore.defaultColor
+    });
     const modelData = modelStore.getModel(modelId);
     
     // Notify the viewer

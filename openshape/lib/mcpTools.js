@@ -543,6 +543,10 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the cube'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the cube in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['width', 'height', 'depth']
@@ -599,6 +603,10 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the cylinder'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the cylinder in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius', 'height']
@@ -651,6 +659,10 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the sphere'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the sphere in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius']
@@ -707,6 +719,10 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the torus'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the torus in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['innerRadius', 'outerRadius']
@@ -1555,6 +1571,143 @@ const registerUtilityTools = () => {
       }
     }
   });
+
+  // Set default color tool
+  mcpClient.registerTool({
+    name: 'set_default_model_color',
+    description: 'Sets the default color for all models. This color will be applied to all new models created.',
+    parameters: {
+      type: 'object',
+      properties: {
+        color: {
+          type: 'string',
+          description: 'Color in hex format (e.g., "#94a6b5") or CSS color name'
+        }
+      },
+      required: ['color']
+    },
+    execute: async (params) => {
+      console.log('Setting default model color:', params.color);
+      
+      try {
+        // Validate color format
+        const colorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$|^[a-zA-Z]+$/;
+        if (!colorRegex.test(params.color)) {
+          return {
+            success: false,
+            error: 'Invalid color format. Please use hex format (e.g., "#94a6b5") or CSS color name.'
+          };
+        }
+        
+        // Set the default color
+        modelStore.setDefaultColor(params.color);
+        
+        return {
+          success: true,
+          message: `Default model color set to ${params.color}. All new models will use this color.`,
+          defaultColor: params.color
+        };
+      } catch (error) {
+        console.error('Error setting default color:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Get default color tool
+  mcpClient.registerTool({
+    name: 'get_default_model_color',
+    description: 'Gets the current default color for models',
+    parameters: {
+      type: 'object',
+      properties: {}
+    },
+    execute: async (params) => {
+      console.log('Getting default model color');
+      
+      try {
+        const defaultColor = modelStore.getDefaultColor();
+        
+        return {
+          success: true,
+          defaultColor: defaultColor,
+          message: `Current default model color is ${defaultColor}`
+        };
+      } catch (error) {
+        console.error('Error getting default color:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Set model color tool
+  mcpClient.registerTool({
+    name: 'set_model_color',
+    description: 'Sets the color for a specific model',
+    parameters: {
+      type: 'object',
+      properties: {
+        modelId: {
+          type: 'string',
+          description: 'ID of the model to change color'
+        },
+        color: {
+          type: 'string',
+          description: 'Color in hex format (e.g., "#94a6b5") or CSS color name'
+        }
+      },
+      required: ['modelId', 'color']
+    },
+    execute: async (params) => {
+      console.log('Setting model color:', params);
+      
+      try {
+        // Validate color format
+        const colorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$|^[a-zA-Z]+$/;
+        if (!colorRegex.test(params.color)) {
+          return {
+            success: false,
+            error: 'Invalid color format. Please use hex format (e.g., "#94a6b5") or CSS color name.'
+          };
+        }
+        
+        // Set the model color
+        const success = modelStore.setModelColor(params.modelId, params.color);
+        
+        if (success) {
+          // Notify the viewer of the change
+          const modelData = modelStore.getModel(params.modelId);
+          if (modelData) {
+            notifyModelChanged(modelData);
+          }
+          
+          return {
+            success: true,
+            message: `Model ${params.modelId} color set to ${params.color}`,
+            modelId: params.modelId,
+            color: params.color
+          };
+        } else {
+          return {
+            success: false,
+            error: `Model ${params.modelId} not found`
+          };
+        }
+      } catch (error) {
+        console.error('Error setting model color:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
 };
 
 /**
@@ -2029,6 +2182,10 @@ const registerCADOperationsTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the sphere'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the sphere in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius']
@@ -2079,6 +2236,10 @@ const registerCADOperationsTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the cylinder'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the cylinder in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius', 'height']

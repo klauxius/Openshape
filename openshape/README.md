@@ -20,35 +20,46 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## Key Features
 
-### Chain of Thought Management
-- **Structured Reasoning**: AI agents can maintain focus through step-by-step reasoning
-- **Decision Tracking**: Every decision is recorded with rationale and next actions
-- **Context Maintenance**: Keeps track of progress across multiple operations
-- **Transparency**: Users can see exactly how the AI thinks through problems
+### Chain of Thought System
+- **Structured Reasoning**: AI agents maintain focus and reasoning continuity during complex tasks
+- **Transparency**: Track thoughts, actions, observations, and decisions
+- **Context Preservation**: Maintain reasoning context across multiple tool calls
+- **Error Recovery**: Graceful handling of failures with detailed error context
 
 ### Multi-Step Task Management
-- **Complex Operations**: Handle multi-step CAD operations systematically
-- **Progress Tracking**: Monitor completion of individual steps
-- **Error Handling**: Identify and address failed steps
-- **Automatic Execution**: Complete complex tasks without user intervention
+- **Complex Operations**: Break down complex CAD operations into manageable steps
+- **Automatic Execution**: Agent automatically executes all steps after task creation
+- **Progress Tracking**: Monitor completion status of individual steps
+- **Error Handling**: Mark failed steps and provide detailed error information
 
 ### CAD Operations
-- **3D Modeling**: Create and manipulate 3D objects
-- **Boolean Operations**: Union, subtract, and intersect shapes
-- **Sketching Tools**: 2D sketching with extrusion capabilities
-- **Design History**: Track and iterate on design changes
+- **Primitive Shapes**: Create cubes, spheres, cylinders, and tori
+- **Boolean Operations**: Union, subtract, and intersect operations
+- **Transformations**: Move, rotate, and scale objects
+- **Sketching**: 2D sketching with extrusion capabilities
+- **Measurement Tools**: Distance and angle measurements
+
+### Model Color Management
+- **Default Color**: All models use a consistent default color (#94a6b5)
+- **Color Customization**: Set individual model colors or change the default
+- **Color Tools**: MCP tools for managing model colors
+- **Visual Consistency**: Maintain visual coherence across all models
 
 ## Documentation
 
-- [Chain of Thought MCP Tool System](CHAIN_OF_THOUGHT_MCP_TOOL.md) - Complete guide to the Chain of Thought reasoning system
-- [Multi-Step Task Management](MULTI_STEP_TASK_MANAGEMENT.md) - Guide to managing complex multi-step operations
-- [Test Multi-Step Example](TEST_MULTI_STEP_EXAMPLE.md) - Example of multi-step task execution
+- **[Chain of Thought System](CHAIN_OF_THOUGHT_MCP_TOOL.md)** - Detailed guide to the Chain of Thought MCP tool
+- **[Multi-Step Task Management](MULTI_STEP_TASK_MANAGEMENT.md)** - How to use the multi-step task system
+- **[Color Management](COLOR_MANAGEMENT.md)** - Model color management and customization
+- **[Test Examples](TEST_MULTI_STEP_EXAMPLE.md)** - Examples and testing procedures
 
 ## Example Pages
 
-- `/chain-of-thought-example` - Interactive demonstration of the Chain of Thought system
-- `/cad-interface` - Main CAD interface with all features
-- `/jscad-features` - JSCAD-specific features and operations
+- **`/`** - Main CAD interface with AI assistant
+- **`/cad-interface`** - Full CAD interface with all features
+- **`/pure-three`** - Basic Three.js scene
+- **`/three-test`** - Three.js component testing
+- **`/webgl-test`** - WebGL capabilities testing
+- **`/color-test`** - Model color management testing
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

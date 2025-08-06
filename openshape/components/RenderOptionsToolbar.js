@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Grid, Eye, EyeOff, Layers, Settings } from 'lucide-react';
+import { Grid, Eye, EyeOff, Layers } from 'lucide-react';
 
 /**
  * RenderOptionsToolbar - A floating toolbar for adjusting model rendering options
@@ -37,20 +37,20 @@ const RenderOptionsToolbar = ({
   return (
     <div 
       className="fixed z-30 transition-all duration-300 ease-in-out"
-      style={{
-        right: '20px',
-        top: '160px', // Position under the ViewCube (70px + 80px + 10px gap)
-      }}
+                   style={{
+               right: '20px',
+               top: '260px', // Position further down under the ViewCube (160px + 100px as requested)
+             }}
     >
       {/* Main toggle button */}
       <div className="flex flex-col items-end space-y-2">
-        <button
-          onClick={toggleExpanded}
-          className="flex items-center justify-center w-10 h-10 bg-white bg-opacity-90 hover:bg-opacity-100 rounded-lg shadow-lg border border-gray-200 transition-all duration-200 hover:shadow-xl"
-          title="Render Options"
-        >
-          <Settings size={18} className="text-gray-700" />
-        </button>
+                       <button
+                 onClick={toggleExpanded}
+                 className="flex items-center justify-center w-10 h-10 bg-white bg-opacity-90 hover:bg-opacity-100 rounded-lg shadow-lg border border-gray-200 transition-all duration-200 hover:shadow-xl"
+                 title="Render Options"
+               >
+                 <Eye size={18} className="text-gray-700" />
+               </button>
 
         {/* Expanded toolbar */}
         {isExpanded && (

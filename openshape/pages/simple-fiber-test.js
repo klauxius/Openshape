@@ -206,7 +206,7 @@ const CustomJSCadView = ({ children }) => {
           // Since we don't have direct access, we'll create a simple box geometry
           const geometry = new ThreeJS.BoxGeometry(10, 10, 10);
           const material = new ThreeJS.MeshStandardMaterial({
-            color: 0x0088ff,
+            color: 0x94a6b5,
             wireframe: false,
             side: ThreeJS.DoubleSide
           });

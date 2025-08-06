@@ -23,15 +23,15 @@ const JSCADViewer = ({ code }) => {
       if (code.includes('cube')) {
         // Import dynamically to avoid SSR issues
         import('jscad-fiber').then(({ Cube }) => {
-          setGeometryComponent(<Cube size={10} color="steelblue" />)
+          setGeometryComponent(<Cube size={10} color="#94a6b5" />)
         })
       } else if (code.includes('sphere')) {
         import('jscad-fiber').then(({ Sphere }) => {
-          setGeometryComponent(<Sphere radius={10} color="coral" />)
+          setGeometryComponent(<Sphere radius={10} color="#94a6b5" />)
         })
       } else if (code.includes('cylinder')) {
         import('jscad-fiber').then(({ Cylinder }) => {
-          setGeometryComponent(<Cylinder radius={5} height={10} color="seagreen" />)
+          setGeometryComponent(<Cylinder radius={5} height={10} color="#94a6b5" />)
         })
       } else {
         setError('Unsupported geometry type')

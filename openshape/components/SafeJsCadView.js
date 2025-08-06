@@ -93,7 +93,7 @@ function CustomJSCADView() {
       root.render(React.createElement(Cube, { 
         size: 10, 
         center: [0, 0, 0],
-        color: "blue"
+        color: "#94a6b5"
       }));
 
       // Process the JSCAD geometry and add it to the scene
@@ -101,7 +101,7 @@ function CustomJSCADView() {
         // Fallback simple cube if we can't process the geometry
         const geometry = new THREE.BoxGeometry(10, 10, 10);
         const material = new THREE.MeshStandardMaterial({
-          color: 0x0088ff,
+          color: 0x94a6b5,
           side: THREE.DoubleSide
         });
         const mesh = new THREE.Mesh(geometry, material);

@@ -109,6 +109,9 @@ export const modelStore = {
   models: {},
   activeModelId: null,
   
+  // Default color configuration
+  defaultColor: '#94a6b5', // Default color for all models
+  
   // Add a model to the store
   addModel(geometry, name = '', options = {}) {
     const modelId = options.id || `model_${Date.now()}`;
@@ -119,6 +122,7 @@ export const modelStore = {
       name: name || `Model ${Object.keys(this.models).length + 1}`,
       geometry,
       isVisible: options.isVisible !== undefined ? options.isVisible : true,
+      color: options.color || this.defaultColor, // Use provided color or default
       createdAt: new Date(),
       ...options
     };
@@ -196,6 +200,42 @@ export const modelStore = {
   clear() {
     this.models = {};
     this.activeModelId = null;
+  },
+  
+  // Set default color for all models
+  setDefaultColor(color) {
+    this.defaultColor = color;
+    
+    // Update all existing models to use the new default color
+    Object.values(this.models).forEach(model => {
+      if (!model.color || model.color === this.defaultColor) {
+        model.color = color;
+      }
+    });
+    
+    // Notify all viewers of the change
+    this.notifyAllModelsChanged();
+  },
+  
+  // Get default color
+  getDefaultColor() {
+    return this.defaultColor;
+  },
+  
+  // Update a model's color
+  setModelColor(modelId, color) {
+    if (this.models[modelId]) {
+      this.models[modelId].color = color;
+      return true;
+    }
+    return false;
+  },
+  
+  // Notify all models have changed (for color updates)
+  notifyAllModelsChanged() {
+    Object.values(this.models).forEach(model => {
+      notifyModelChanged(model);
+    });
   }
 };
 

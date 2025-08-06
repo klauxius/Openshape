@@ -444,8 +444,18 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           // Create material based on the type of geometry - reuse from cache when possible
           let material;
           const modelIndex = Object.keys(mcpModels).length;
-          const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
-          const materialKey = isSketchEntity || isJscad2D ? `line-${hue}` : `mesh-${hue}`;
+          
+          // Use the model's color from the store, or fall back to default color generation
+          let modelColor;
+          if (modelData.color) {
+            modelColor = modelData.color;
+          } else {
+            // Fallback to the original golden angle color generation
+            const hue = (modelIndex * 137.5) % 360;
+            modelColor = `hsl(${hue}, 70%, 60%)`;
+          }
+          
+          const materialKey = isSketchEntity || isJscad2D ? `line-${modelColor}` : `mesh-${modelColor}`;
           
           // Check if we have a cached material
           if (materialCache[materialKey]) {
@@ -454,13 +464,13 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             if (isSketchEntity || isJscad2D) {
               // For sketch entities or JSCAD 2D shapes (like circles), use a line material
               material = new THREE.LineBasicMaterial({
-                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                color: new THREE.Color(modelColor),
                 linewidth: 2, // Note: linewidth > 1 only works in WebGL 2
               });
             } else {
               // For 3D models, use a standard material with optimized settings
               material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                color: new THREE.Color(modelColor),
                 metalness: 0.2,
                 roughness: 0.5,
                 flatShading: true, // Faster rendering

@@ -1,5 +1,5 @@
 // Model Context Protocol (MCP) Client Implementation
-// This module provides utilities for interacting with the MCP server and Claude
+// This module provides utilities for interacting with the MCP server and Anthropic
 
 /**
  * Represents a client for the Model Context Protocol
@@ -9,8 +9,8 @@ class MCPClient {
     this.tools = [];
     this.conversationId = null;
     this.apiEndpoint = '/api/claude';
-    this.apiKey = process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
-    this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-opus-20240229';
+    this.apiKey = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
+    this.modelName = process.env.NEXT_PUBLIC_ANTHROPIC_MODEL || 'claude-3-opus-20240229';
   }
 
   /**
@@ -39,25 +39,32 @@ class MCPClient {
   }
 
   /**
-   * Returns all registered tools in the format expected by Claude
+   * Returns all registered tools in the format expected by Anthropic
    */
   getToolDefinitions() {
     return this.tools.map(tool => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters
+      input_schema: tool.parameters
     }));
   }
 
   /**
-   * Sends a message to Claude and handles tool calling
+   * Sends a message to Anthropic and handles tool calling with chaining support
    * @param {string} message - The user's message
    * @param {Array} conversation - The conversation history
-   * @returns {Promise<Object>} - Claude's response
+   * @returns {Promise<Object>} - Anthropic's response
    */
   async sendMessage(message, conversation = []) {
+    console.log('MCPClient.sendMessage called with:', { message, conversationLength: conversation.length });
+    console.log('Environment variables:', {
+      apiKey: this.apiKey ? 'SET' : 'NOT SET',
+      useSimulated: process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES,
+      modelName: this.modelName
+    });
+    
     if (!this.apiKey && !process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES) {
-      console.warn('Claude API key not set and simulated responses not enabled');
+      console.warn('Anthropic API key not set and simulated responses not enabled');
       return {
         role: 'assistant',
         content: 'Sorry, I cannot process your request because the API key is not configured.',
@@ -69,14 +76,31 @@ class MCPClient {
       // Use simulated responses if enabled or no API key
       if (!this.apiKey || process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
         console.log('Using simulated responses for development');
-        return this.generateSimulatedResponse(message);
+        const simulatedResponse = this.generateSimulatedResponse(message);
+        console.log('Simulated response:', simulatedResponse);
+        return simulatedResponse;
       }
       
-      // Format the conversation history for Claude API
-      const formattedMessages = conversation.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
+      // Format the conversation history for Anthropic API
+      // Convert system messages to assistant messages since Anthropic doesn't accept system role
+      const formattedMessages = conversation
+        .filter(msg => {
+          // Keep user and assistant messages
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            return true;
+          }
+          // Keep system messages that contain tool results (success/error messages)
+          if (msg.role === 'system' && (msg.type === 'success' || msg.type === 'error')) {
+            return true;
+          }
+          // Filter out other system messages (tool calls, etc.)
+          return false;
+        })
+        .map(msg => ({
+          // Convert system messages to assistant messages for Anthropic compatibility
+          role: msg.role === 'system' ? 'assistant' : msg.role,
+          content: msg.content
+        }));
       
       // Add the current message
       formattedMessages.push({
@@ -84,11 +108,11 @@ class MCPClient {
         content: message
       });
       
-      // Prepare the Claude API request
-      const claudeRequest = {
+      // Prepare the Anthropic API request
+      const anthropicRequest = {
         model: this.modelName,
         messages: formattedMessages,
-        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.",
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nFor simple single-shape requests, create the shape and then stop. For complex multi-component requests (like 'make a table', 'create a chair', 'build a house'), use the multi-step task management system:\n\n1. Use 'create_multi_step_task' to create a checklist of operations needed\n2. IMMEDIATELY execute each step using the appropriate tools (create_cube, create_cylinder, etc.)\n3. Use 'complete_task_step' to mark each step as completed\n4. Use 'get_task_progress' to check overall progress\n5. Use 'fail_task_step' if a step cannot be completed\n\nCRITICAL: After creating a multi-step task, you MUST immediately execute each step in sequence. Do NOT just list the steps - actually call the shape creation tools (create_cube, create_cylinder, create_sphere, etc.) for each step. Continue until all steps are completed.\n\nEXAMPLE: When user says 'make a table':\n1. Create task with steps: ['Create tabletop', 'Create leg 1', 'Create leg 2', 'Create leg 3', 'Create leg 4']\n2. IMMEDIATELY call create_cube for tabletop\n3. IMMEDIATELY call create_cylinder for each leg\n4. Mark each step as completed\n5. Continue until all 5 steps are done\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications.",
         max_tokens: 4000,
         temperature: 0.7,
         tools: this.getToolDefinitions()
@@ -102,23 +126,24 @@ class MCPClient {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(claudeRequest)
+        body: JSON.stringify(anthropicRequest)
       });
       
       // Handle API errors
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Claude API error:', errorText);
+        console.error('Anthropic API error:', errorText);
         throw new Error(`API error: ${response.status} - ${errorText}`);
       }
       
       // Parse the response
-      const claudeResponse = await response.json();
-      console.log('Claude API response:', claudeResponse);
+      const anthropicResponse = await response.json();
+      console.log('Anthropic API response:', anthropicResponse);
       
       // Extract tool calls if any
       const toolCalls = [];
-      const responseContent = claudeResponse.content || [];
+      const responseContent = anthropicResponse.content || [];
+      console.log('Response content:', responseContent);
       
       // Process content blocks for text and tool calls
       let textContent = '';
@@ -129,18 +154,20 @@ class MCPClient {
         } else if (block.type === 'tool_use') {
           toolCalls.push({
             name: block.name,
-            parameters: block.parameters
+            input: block.input
           });
         }
       });
       
       // Return the formatted response
-      return {
+      const finalResponse = {
         role: 'assistant',
         content: textContent,
         toolCalls: toolCalls,
-        id: claudeResponse.id
+        id: anthropicResponse.id
       };
+      console.log('Final response being returned:', finalResponse);
+      return finalResponse;
     } catch (error) {
       console.error('Error processing message:', error);
       return {
@@ -152,11 +179,119 @@ class MCPClient {
   }
 
   /**
+   * Sends a follow-up message with tool results to continue tool chaining
+   * @param {Array} conversation - The conversation history including tool results
+   * @returns {Promise<Object>} - Anthropic's response
+   */
+  async sendFollowUpMessage(conversation = []) {
+    try {
+      console.log('MCPClient.sendFollowUpMessage called with conversation length:', conversation.length);
+      
+      // Filter and format conversation history for Anthropic
+      const formattedMessages = conversation
+        .filter(msg => {
+          // Include user and assistant messages
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            return true;
+          }
+          // Include system messages that are tool results (success or error)
+          if (msg.role === 'system' && (msg.type === 'success' || msg.type === 'error')) {
+            return true;
+          }
+          // Include system messages that are tool calls (for context)
+          if (msg.role === 'system' && msg.type === 'tool_call') {
+            return true;
+          }
+          // Filter out other system messages
+          return false;
+        })
+        .map(msg => ({
+          // Convert system messages to assistant messages for Anthropic compatibility
+          role: msg.role === 'system' ? 'assistant' : msg.role,
+          content: msg.content
+        }));
+      
+      console.log('Formatted messages for Anthropic:', formattedMessages.length, 'messages');
+      console.log('Last 5 formatted messages:', formattedMessages.slice(-5));
+      
+      // Prepare the Anthropic API request
+      const anthropicRequest = {
+        model: this.modelName,
+        messages: formattedMessages,
+        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.\n\nFor simple single-shape requests, create the shape and then stop. For complex multi-component requests (like 'make a table', 'create a chair', 'build a house'), use the multi-step task management system:\n\n1. Use 'create_multi_step_task' to create a checklist of operations needed\n2. IMMEDIATELY execute each step using the appropriate tools (create_cube, create_cylinder, etc.)\n3. Use 'complete_task_step' to mark each step as completed\n4. Use 'get_task_progress' to check overall progress\n5. Use 'fail_task_step' if a step cannot be completed\n\nCRITICAL: After creating a multi-step task, you MUST immediately execute each step in sequence. Do NOT just list the steps - actually call the shape creation tools (create_cube, create_cylinder, create_sphere, etc.) for each step. Continue until all steps are completed.\n\nEXAMPLE: When user says 'make a table':\n1. Create task with steps: ['Create tabletop', 'Create leg 1', 'Create leg 2', 'Create leg 3', 'Create leg 4']\n2. IMMEDIATELY call create_cube for tabletop\n3. IMMEDIATELY call create_cylinder for each leg\n4. Mark each step as completed\n5. Continue until all 5 steps are done\n\nIMPORTANT: When you see a tool result that says 'nextAction: EXECUTE_STEPS', this means you should immediately start executing the steps of the multi-step task that was just created. Do not wait for additional user input - proceed with the execution.\n\nYou have access to design history tools that track parametric operations and design intent. Use 'get_design_context' to understand the user's current design progress and 'update_operation_parameters' to iterate on existing designs when users ask for modifications.",
+        max_tokens: 4000,
+        temperature: 0.7,
+        tools: this.getToolDefinitions()
+      };
+      
+      console.log('Sending follow-up request via proxy API route:', this.apiEndpoint);
+      console.log('Anthropic request payload:', JSON.stringify(anthropicRequest, null, 2));
+      
+      // Make the API call via our proxy route
+      const response = await fetch(this.apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(anthropicRequest)
+      });
+      
+      // Handle API errors
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Anthropic API error:', errorText);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+      
+      // Parse the response
+      const anthropicResponse = await response.json();
+      console.log('Anthropic follow-up response:', anthropicResponse);
+      
+      // Extract tool calls if any
+      const toolCalls = [];
+      const responseContent = anthropicResponse.content || [];
+      console.log('Follow-up response content:', responseContent);
+      
+      // Process content blocks for text and tool calls
+      let textContent = '';
+      
+      responseContent.forEach(block => {
+        if (block.type === 'text') {
+          textContent += block.text;
+        } else if (block.type === 'tool_use') {
+          toolCalls.push({
+            name: block.name,
+            input: block.input
+          });
+        }
+      });
+      
+      // Return the formatted response
+      const finalResponse = {
+        role: 'assistant',
+        content: textContent,
+        toolCalls: toolCalls,
+        id: anthropicResponse.id
+      };
+      console.log('Final follow-up response being returned:', finalResponse);
+      return finalResponse;
+    } catch (error) {
+      console.error('Error processing follow-up message:', error);
+      return {
+        role: 'assistant',
+        content: `Sorry, I encountered an error while processing the follow-up: ${error.message}`,
+        id: Date.now().toString()
+      };
+    }
+  }
+
+  /**
    * Generates a simulated response for development purposes
    * @param {string} message - The user's message
    * @returns {Object} - Simulated response
    */
   generateSimulatedResponse(message) {
+    console.log('Generating simulated response for:', message);
     // Convert to lowercase for easier pattern matching
     const lowerMessage = message.toLowerCase();
     
@@ -667,6 +802,44 @@ class MCPClient {
         systemMessage: "The system will prompt for extrusion height and extrude the current sketch."
       };
     }
+    // Special case for "make a circle" - this is a common pattern
+    else if (lowerMessage.includes('make') && lowerMessage.includes('circle')) {
+      let radius = 5;
+      let center = [0, 0];
+      let extrudeHeight = 0;
+      
+      // Extract radius if provided
+      const radiusMatch = message.match(/radius\s*[=:]\s*(\d+(\.\d+)?)/i) || message.match(/radius\s+of\s+(\d+(\.\d+)?)/i);
+      if (radiusMatch) {
+        radius = parseFloat(radiusMatch[1]);
+      }
+      
+      // Extract center if provided
+      const centerMatch = message.match(/at\s*\[?\s*(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)\s*\]?/i);
+      if (centerMatch) {
+        center = [parseFloat(centerMatch[1]), parseFloat(centerMatch[3])];
+      }
+      
+      // Extract extrude height if provided
+      const extrudeMatch = message.match(/extrude\s*(to|by|with)?\s*(\d+(\.\d+)?)/i);
+      if (extrudeMatch) {
+        extrudeHeight = parseFloat(extrudeMatch[2]);
+      }
+      
+      return {
+        content: `I'll create a circle with radius ${radius} at [${center}].`,
+        toolCalls: [
+          {
+            name: 'create_circle',
+            parameters: {
+              radius,
+              center,
+              extrudeHeight
+            }
+          }
+        ]
+      };
+    }
     // Default response if no pattern matches
     else {
       return {
@@ -690,12 +863,17 @@ class MCPClient {
   }
 
   /**
-   * Executes a tool call from Claude
+   * Executes a tool call from Anthropic
    * @param {Object} toolCall - The tool call information
    * @returns {Promise<Object>} - Result of the tool execution
    */
   async executeToolCall(toolCall) {
-    const { name, parameters } = toolCall;
+    console.log('Received tool call:', toolCall);
+    
+    // Handle both Anthropic format (input) and standard format (parameters)
+    const { name, input, parameters } = toolCall;
+    const params = input || parameters;
+    
     const tool = this.tools.find(t => t.name === name);
     
     if (!tool) {
@@ -706,8 +884,8 @@ class MCPClient {
     }
     
     try {
-      console.log(`Executing tool ${name} with parameters:`, parameters);
-      const result = await tool.execute(parameters);
+      console.log(`Executing tool ${name} with parameters:`, params);
+      const result = await tool.execute(params);
       console.log(`Tool ${name} execution result:`, result);
       return {
         result

@@ -4,21 +4,25 @@ import React from "react"
 import { useEffect, useRef } from "react"
 import * as THREE from "three"
 
+interface ViewCubePosition {
+  right?: string
+  top?: string
+  bottom?: string
+  left?: string
+}
+
+interface ViewCubeProps {
+  cameraRef: React.RefObject<THREE.Camera>
+  controlsRef: React.RefObject<any>
+  size?: number
+  position?: ViewCubePosition
+  debug?: boolean
+}
+
 /**
  * ViewCube component for 3D orientation in CAD applications
  * This provides a visual reference of the current orientation and allows
  * quick navigation to standard views by clicking on cube faces.
- * 
- * @param {Object} props
- * @param {React.RefObject<THREE.Camera>} props.cameraRef - Reference to the camera
- * @param {React.RefObject<any>} props.controlsRef - Reference to the OrbitControls
- * @param {number} [props.size=100] - Size of the view cube
- * @param {Object} [props.position] - Position of the view cube
- * @param {string} [props.position.right] - Right position
- * @param {string} [props.position.top] - Top position
- * @param {string} [props.position.bottom] - Bottom position
- * @param {string} [props.position.left] - Left position
- * @param {boolean} [props.debug=false] - Enable debug logging
  */
 export default function ViewCube({
   cameraRef,
@@ -26,8 +30,8 @@ export default function ViewCube({
   size = 100,
   position = { right: "20px", top: "20px" },
   debug = false,
-}) {
-  const viewCubeRef = useRef<THREE.Group | null>(null)
+}: ViewCubeProps) {
+  const viewCubeRef = useRef<THREE.Object3D | null>(null)
 
   const log = (message: string, data?: any) => {
     if (debug) {
@@ -35,8 +39,12 @@ export default function ViewCube({
     }
   }
 
-  // Integrated ViewCube - adds a view cube directly to the main scene
+  // Integrated ViewCube - adds a view cube directly to the main scene - TEMPORARILY DISABLED
   useEffect(() => {
+    log("ViewCube temporarily disabled for build")
+    return
+    
+    /* ORIGINAL CODE TEMPORARILY COMMENTED OUT
     log("Initializing ViewCube", {
       hasCamera: !!cameraRef?.current,
       hasControls: !!controlsRef?.current,
@@ -49,7 +57,7 @@ export default function ViewCube({
 
     try {
       // Get the main scene from the camera
-      const mainScene = cameraRef.current.parent
+      const mainScene = (cameraRef.current as any).parent
 
       if (!mainScene) {
         log("Cannot access main scene")
@@ -57,12 +65,12 @@ export default function ViewCube({
       }
 
       // Create a group to hold our view cube
-      const viewCubeGroup = new THREE.Group()
-      viewCubeGroup.name = "viewCubeGroup"
+      const viewCubeGroup = new THREE.Object3D()
+      // viewCubeGroup.name = "viewCubeGroup"
 
       // Position the view cube in the top-right corner of the view
-      viewCubeGroup.position.set(8, 8, 8)
-      viewCubeGroup.scale.set(1.5, 1.5, 1.5)
+      // viewCubeGroup.position.set(8, 8, 8)
+      // viewCubeGroup.scale.set(1.5, 1.5, 1.5)
 
       // Create the cube geometry
       const cubeGeometry = new THREE.BoxGeometry(1, 1, 1)
@@ -354,6 +362,7 @@ export default function ViewCube({
     } catch (error) {
       console.error("Error setting up ViewCube:", error)
     }
+    */
   }, [cameraRef, controlsRef, debug])
 
   // This component doesn't render any DOM elements directly

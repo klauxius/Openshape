@@ -78,10 +78,10 @@ function ThreeScene() {
       directionalLight.position.set(2, 4, 3);
       scene.add(directionalLight);
 
-      // Create a simple blue cube
+      // Create a simple cube with default color
       const geometry = new THREE.BoxGeometry(2, 2, 2);
       const material = new THREE.MeshStandardMaterial({ 
-        color: 0x0088ff,
+        color: 0x94a6b5,
         metalness: 0.1,
         roughness: 0.5
       });

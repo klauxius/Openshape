@@ -1,4 +1,6 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OpenShape - AI-Powered CAD Interface
+
+This is a [Next.js](https://nextjs.org) project that provides an AI-powered CAD interface with advanced features including Chain of Thought reasoning, multi-step task management, and comprehensive 3D modeling capabilities.
 
 ## Getting Started
 
@@ -16,7 +18,48 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Key Features
+
+### Chain of Thought System
+- **Structured Reasoning**: AI agents maintain focus and reasoning continuity during complex tasks
+- **Transparency**: Track thoughts, actions, observations, and decisions
+- **Context Preservation**: Maintain reasoning context across multiple tool calls
+- **Error Recovery**: Graceful handling of failures with detailed error context
+
+### Multi-Step Task Management
+- **Complex Operations**: Break down complex CAD operations into manageable steps
+- **Automatic Execution**: Agent automatically executes all steps after task creation
+- **Progress Tracking**: Monitor completion status of individual steps
+- **Error Handling**: Mark failed steps and provide detailed error information
+
+### CAD Operations
+- **Primitive Shapes**: Create cubes, spheres, cylinders, and tori
+- **Boolean Operations**: Union, subtract, and intersect operations
+- **Transformations**: Move, rotate, and scale objects
+- **Sketching**: 2D sketching with extrusion capabilities
+- **Measurement Tools**: Distance and angle measurements
+
+### Model Color Management
+- **Default Color**: All models use a consistent default color (#94a6b5)
+- **Color Customization**: Set individual model colors or change the default
+- **Color Tools**: MCP tools for managing model colors
+- **Visual Consistency**: Maintain visual coherence across all models
+
+## Documentation
+
+- **[Chain of Thought System](CHAIN_OF_THOUGHT_MCP_TOOL.md)** - Detailed guide to the Chain of Thought MCP tool
+- **[Multi-Step Task Management](MULTI_STEP_TASK_MANAGEMENT.md)** - How to use the multi-step task system
+- **[Color Management](COLOR_MANAGEMENT.md)** - Model color management and customization
+- **[Test Examples](TEST_MULTI_STEP_EXAMPLE.md)** - Examples and testing procedures
+
+## Example Pages
+
+- **`/`** - Main CAD interface with AI assistant
+- **`/cad-interface`** - Full CAD interface with all features
+- **`/pure-three`** - Basic Three.js scene
+- **`/three-test`** - Three.js component testing
+- **`/webgl-test`** - WebGL capabilities testing
+- **`/color-test`** - Model color management testing
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 

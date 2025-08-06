@@ -10,6 +10,7 @@ import { useUnits } from '../contexts/UnitContext';
 import MeasurementTool from './measurements/MeasurementTool';
 import MeasurementControls from './measurements/MeasurementControls';
 import ReferencePlanes from './ReferencePlanes';
+import RenderOptionsToolbar from './RenderOptionsToolbar';
 import { Ruler, Layers } from 'lucide-react';
 
 // Performance configuration object - easily tune performance settings
@@ -313,7 +314,7 @@ function jscadToThreeGeometry(jscadGeometry) {
   }
 }
 
-const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
+const JscadThreeViewer = forwardRef(({ onModelChange, renderOptions: externalRenderOptions, ...props }, ref) => {
   const mountRef = useRef(null);
   const controlsRef = useRef(null);
   const [modelType, setModelType] = useState('cube');
@@ -344,6 +345,17 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
   // Store MCP models
   const [mcpModels, setMcpModels] = useState({});
   const meshesRef = useRef({});
+  const materialCacheRef = useRef({});
+
+  // Render options state - use external options if provided, otherwise use internal state
+  const [internalRenderOptions, setInternalRenderOptions] = useState({
+    wireframe: false,
+    transparency: 1.0,
+    showEdges: false
+  });
+  
+  const renderOptions = externalRenderOptions || internalRenderOptions;
+  const setRenderOptions = externalRenderOptions ? (() => {}) : setInternalRenderOptions;
 
   // Add sketch mode state to track when rotation should be disabled
   const [inSketchMode, setInSketchMode] = useState(false);
@@ -362,9 +374,6 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
 
   // Add a separate useEffect to handle MCP model change events
   useEffect(() => {
-    // Set up material cache for reusing materials
-    const materialCache = {};
-    
     // Store model references for instancing
     const modelGeometryCache = {};
     
@@ -406,11 +415,11 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
               if (Array.isArray(oldMesh.material)) {
                 oldMesh.material.forEach(m => {
                   // Only dispose if not in cache (shared)
-                  if (m && !Object.values(materialCache).includes(m)) {
+                  if (m && !Object.values(materialCacheRef.current).includes(m)) {
                     m.dispose();
                   }
                 });
-              } else if (!Object.values(materialCache).includes(oldMesh.material)) {
+              } else if (!Object.values(materialCacheRef.current).includes(oldMesh.material)) {
                 oldMesh.material.dispose();
               }
             }
@@ -444,32 +453,50 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           // Create material based on the type of geometry - reuse from cache when possible
           let material;
           const modelIndex = Object.keys(mcpModels).length;
-          const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
-          const materialKey = isSketchEntity || isJscad2D ? `line-${hue}` : `mesh-${hue}`;
+          
+          // Use the model's color from the store, or fall back to default color generation
+          let modelColor;
+          if (modelData.color) {
+            modelColor = modelData.color;
+          } else {
+            // Fallback to the original golden angle color generation
+            const hue = (modelIndex * 137.5) % 360;
+            modelColor = `hsl(${hue}, 70%, 60%)`;
+          }
+          
+          // Create material key that includes render options for proper caching
+          const materialKey = isSketchEntity || isJscad2D 
+            ? `line-${modelColor}-${renderOptions.wireframe}-${renderOptions.transparency}` 
+            : `mesh-${modelColor}-${renderOptions.wireframe}-${renderOptions.transparency}`;
           
           // Check if we have a cached material
-          if (materialCache[materialKey]) {
-            material = materialCache[materialKey];
+          if (materialCacheRef.current[materialKey]) {
+            material = materialCacheRef.current[materialKey];
           } else {
             if (isSketchEntity || isJscad2D) {
               // For sketch entities or JSCAD 2D shapes (like circles), use a line material
               material = new THREE.LineBasicMaterial({
-                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                color: new THREE.Color(modelColor),
                 linewidth: 2, // Note: linewidth > 1 only works in WebGL 2
+                transparent: renderOptions.transparency < 1.0,
+                opacity: renderOptions.transparency,
               });
             } else {
               // For 3D models, use a standard material with optimized settings
               material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                color: new THREE.Color(modelColor),
                 metalness: 0.2,
                 roughness: 0.5,
                 flatShading: true, // Faster rendering
                 vertexColors: false, // Disable for better performance
+                wireframe: renderOptions.wireframe,
+                transparent: renderOptions.transparency < 1.0,
+                opacity: renderOptions.transparency,
               });
             }
             
             // Add to cache
-            materialCache[materialKey] = material;
+            materialCacheRef.current[materialKey] = material;
           }
           
           // Create appropriate mesh or line based on geometry type
@@ -481,6 +508,19 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           } else {
             // For 3D models, create a regular mesh
             object = new THREE.Mesh(threeGeometry, material);
+            
+            // Add edges if requested
+            if (renderOptions.showEdges) {
+              const edgesGeometry = new THREE.EdgesGeometry(threeGeometry);
+              const edgesMaterial = new THREE.LineBasicMaterial({
+                color: 0x000000,
+                linewidth: 1,
+                transparent: renderOptions.transparency < 1.0,
+                opacity: renderOptions.transparency,
+              });
+              const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+              object.add(edges);
+            }
           }
           
           // Enable frustum culling for better performance
@@ -509,6 +549,57 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
       }
     };
   }, [mcpModels]);
+
+  // Add useEffect to update materials when render options change
+  useEffect(() => {
+    // Clear material cache to force recreation with new render options
+    materialCacheRef.current = {};
+    
+    // Update all existing meshes with new render options
+    Object.keys(meshesRef.current).forEach(modelId => {
+      const mesh = meshesRef.current[modelId];
+      if (mesh && mesh.material) {
+        // Update material properties
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach(material => {
+            if (material) {
+              material.wireframe = renderOptions.wireframe;
+              material.transparent = renderOptions.transparency < 1.0;
+              material.opacity = renderOptions.transparency;
+            }
+          });
+        } else {
+          mesh.material.wireframe = renderOptions.wireframe;
+          mesh.material.transparent = renderOptions.transparency < 1.0;
+          mesh.material.opacity = renderOptions.transparency;
+        }
+        
+        // Handle edges
+        if (mesh.type === 'Mesh') {
+          // Remove existing edges
+          const existingEdges = mesh.children.filter(child => child.type === 'LineSegments');
+          existingEdges.forEach(edge => {
+            mesh.remove(edge);
+            if (edge.geometry) edge.geometry.dispose();
+            if (edge.material) edge.material.dispose();
+          });
+          
+          // Add new edges if requested
+          if (renderOptions.showEdges) {
+            const edgesGeometry = new THREE.EdgesGeometry(mesh.geometry);
+            const edgesMaterial = new THREE.LineBasicMaterial({
+              color: 0x000000,
+              linewidth: 1,
+              transparent: renderOptions.transparency < 1.0,
+              opacity: renderOptions.transparency,
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            mesh.add(edges);
+          }
+        }
+      }
+    });
+  }, [renderOptions.wireframe, renderOptions.transparency, renderOptions.showEdges]);
 
   // Add this useEffect to handle sketch mode change events
   useEffect(() => {
@@ -1444,6 +1535,14 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         size={40}
         position={{ top: '70px', right: '20px' }}
       />
+
+      {/* Render Options Toolbar - only show if no external render options provided */}
+      {!externalRenderOptions && (
+        <RenderOptionsToolbar 
+          onRenderOptionsChange={setInternalRenderOptions}
+          initialOptions={internalRenderOptions}
+        />
+      )}
 
       {/* Navigation help with updated text for sketch mode */}
       <div className="absolute bottom-16 left-4 text-xs text-gray-600 bg-white bg-opacity-70 p-2 rounded">

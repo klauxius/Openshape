@@ -5,11 +5,112 @@ import mcpClient from './mcpClient';
 import * as jscad from '@jscad/modeling';
 import partsLibrary from './partsLibrary';
 import CADOperations from './cadOperations';
+import designHistory from './designHistory';
+
+// Multi-step task management
+export const taskManager = {
+  activeTasks: {},
+  
+  // Create a new multi-step task
+  createTask(taskId, description, steps) {
+    this.activeTasks[taskId] = {
+      id: taskId,
+      description,
+      steps: steps.map((step, index) => ({
+        id: index + 1,
+        description: step,
+        completed: false,
+        result: null,
+        error: null
+      })),
+      status: 'in_progress',
+      createdAt: new Date(),
+      completedAt: null
+    };
+    return this.activeTasks[taskId];
+  },
+  
+  // Get a task by ID
+  getTask(taskId) {
+    return this.activeTasks[taskId];
+  },
+  
+  // Mark a step as completed
+  completeStep(taskId, stepId, result = null) {
+    const task = this.activeTasks[taskId];
+    if (!task) return false;
+    
+    const step = task.steps.find(s => s.id === stepId);
+    if (!step) return false;
+    
+    step.completed = true;
+    step.result = result;
+    step.completedAt = new Date();
+    
+    // Check if all steps are completed
+    if (task.steps.every(s => s.completed)) {
+      task.status = 'completed';
+      task.completedAt = new Date();
+    }
+    
+    return true;
+  },
+  
+  // Mark a step as failed
+  failStep(taskId, stepId, error) {
+    const task = this.activeTasks[taskId];
+    if (!task) return false;
+    
+    const step = task.steps.find(s => s.id === stepId);
+    if (!step) return false;
+    
+    step.error = error;
+    task.status = 'failed';
+    
+    return true;
+  },
+  
+  // Get task progress
+  getTaskProgress(taskId) {
+    const task = this.activeTasks[taskId];
+    if (!task) return null;
+    
+    const completedSteps = task.steps.filter(s => s.completed).length;
+    const totalSteps = task.steps.length;
+    
+    return {
+      taskId,
+      description: task.description,
+      status: task.status,
+      progress: {
+        completed: completedSteps,
+        total: totalSteps,
+        percentage: Math.round((completedSteps / totalSteps) * 100)
+      },
+      steps: task.steps,
+      createdAt: task.createdAt,
+      completedAt: task.completedAt
+    };
+  },
+  
+  // Clear completed tasks
+  clearCompletedTasks() {
+    Object.keys(this.activeTasks).forEach(taskId => {
+      if (this.activeTasks[taskId].status === 'completed' || 
+          this.activeTasks[taskId].status === 'failed') {
+        delete this.activeTasks[taskId];
+      }
+    });
+  }
+};
 
 // Model store for managing 3D models 
 export const modelStore = {
   models: {},
   activeModelId: null,
+  
+  // Default color configuration
+  defaultColor: '#94a6b5', // Default color for all models
   
   // Add a model to the store
   addModel(geometry, name = '', options = {}) {
@@ -21,6 +122,7 @@ export const modelStore = {
       name: name || `Model ${Object.keys(this.models).length + 1}`,
       geometry,
       isVisible: options.isVisible !== undefined ? options.isVisible : true,
+      color: options.color || this.defaultColor, // Use provided color or default
       createdAt: new Date(),
       ...options
     };
@@ -98,6 +200,42 @@ export const modelStore = {
   clear() {
     this.models = {};
     this.activeModelId = null;
+  },
+  
+  // Set default color for all models
+  setDefaultColor(color) {
+    this.defaultColor = color;
+    
+    // Update all existing models to use the new default color
+    Object.values(this.models).forEach(model => {
+      if (!model.color || model.color === this.defaultColor) {
+        model.color = color;
+      }
+    });
+    
+    // Notify all viewers of the change
+    this.notifyAllModelsChanged();
+  },
+  
+  // Get default color
+  getDefaultColor() {
+    return this.defaultColor;
+  },
+  
+  // Update a model's color
+  setModelColor(modelId, color) {
+    if (this.models[modelId]) {
+      this.models[modelId].color = color;
+      return true;
+    }
+    return false;
+  },
+  
+  // Notify all models have changed (for color updates)
+  notifyAllModelsChanged() {
+    Object.values(this.models).forEach(model => {
+      notifyModelChanged(model);
+    });
   }
 };
 
@@ -118,6 +256,247 @@ export { notifyModelChanged };
 /**
  * Initialize and register all MCP tools
  */
+/**
+ * Register tools for design history and parametric iteration
+ */
+const registerDesignHistoryTools = () => {
+  // Get Design Context tool for AI understanding
+  mcpClient.registerTool({
+    name: 'get_design_context',
+    description: 'Gets the current design context including history, intent, and parameters for AI understanding',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    },
+    execute: async (params) => {
+      console.log('Getting design context for AI');
+      const context = designHistory.getDesignContext();
+      
+      return {
+        success: true,
+        message: 'Design context retrieved successfully',
+        context
+      };
+    }
+  });
+
+  // Update Parameter tool for AI-driven iteration
+  mcpClient.registerTool({
+    name: 'update_operation_parameters',
+    description: 'Updates parameters of a previous operation to iterate on the design',
+    parameters: {
+      type: 'object',
+      properties: {
+        operationId: {
+          type: 'string',
+          description: 'ID of the operation to update'
+        },
+        parameters: {
+          type: 'object',
+          description: 'New parameter values to apply'
+        },
+        intent: {
+          type: 'string',
+          description: 'Reason for the parameter change'
+        }
+      },
+      required: ['operationId', 'parameters']
+    },
+    execute: async (params) => {
+      console.log('Updating operation parameters:', params);
+      
+      try {
+        const operation = designHistory.updateOperationParameters(
+          params.operationId, 
+          params.parameters
+        );
+        
+        // Record the intent if provided
+        if (params.intent) {
+          if (designHistory.designIntent[params.operationId]) {
+            designHistory.designIntent[params.operationId].intent += ` | Updated: ${params.intent}`;
+          } else {
+            // This shouldn't happen after the designHistory fix, but defensive programming
+            console.warn(`DesignIntent entry missing for operation ${params.operationId}, intent not recorded`);
+          }
+        }
+        
+        return {
+          success: true,
+          message: `Updated parameters for operation ${params.operationId}`,
+          operation
+        };
+      } catch (error) {
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Analyze Design Evolution tool
+  mcpClient.registerTool({
+    name: 'analyze_design_evolution',
+    description: 'Analyzes how design parameters have evolved over time to suggest improvements',
+    parameters: {
+      type: 'object',
+      properties: {
+        parameterName: {
+          type: 'string',
+          description: 'Specific parameter to analyze (optional)'
+        }
+      },
+      required: []
+    },
+    execute: async (params) => {
+      console.log('Analyzing design evolution:', params);
+      
+      if (params.parameterName) {
+        const evolution = designHistory.getParameterEvolution(params.parameterName);
+        return {
+          success: true,
+          message: `Analyzed evolution of parameter: ${params.parameterName}`,
+          evolution
+        };
+      } else {
+        const context = designHistory.getDesignContext();
+        const patterns = {
+          totalOperations: context.totalOperations,
+          designGoals: context.designGoals,
+          recentTrends: context.recentIntents.slice(-5),
+          operationTypes: designHistory.getHistory().reduce((acc, op) => {
+            acc[op.type] = (acc[op.type] || 0) + 1;
+            return acc;
+          }, {})
+        };
+        
+        return {
+          success: true,
+          message: 'Analyzed overall design evolution patterns',
+          patterns
+        };
+      }
+    }
+  });
+};
+
+// Chain of Thought Management System
+export const chainOfThoughtManager = {
+  activeChains: {},
+  
+  // Create a new chain of thought session
+  createChain(chainId, task, initialThought = null) {
+    this.activeChains[chainId] = {
+      id: chainId,
+      task: task,
+      thoughts: [],
+      currentStep: 0,
+      status: 'active',
+      createdAt: new Date(),
+      completedAt: null
+    };
+    
+    if (initialThought) {
+      this.addThought(chainId, initialThought);
+    }
+    
+    return this.activeChains[chainId];
+  },
+  
+  // Add a thought to the chain
+  addThought(chainId, thought, stepType = 'reasoning') {
+    const chain = this.activeChains[chainId];
+    if (!chain) return false;
+    
+    const thoughtEntry = {
+      id: chain.thoughts.length + 1,
+      content: thought,
+      type: stepType, // 'reasoning', 'action', 'observation', 'decision'
+      timestamp: new Date(),
+      stepNumber: chain.currentStep + 1
+    };
+    
+    chain.thoughts.push(thoughtEntry);
+    chain.currentStep++;
+    
+    return thoughtEntry;
+  },
+  
+  // Get the current chain
+  getChain(chainId) {
+    return this.activeChains[chainId];
+  },
+  
+  // Get the current thought context
+  getCurrentContext(chainId) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return null;
+    
+    return {
+      task: chain.task,
+      currentStep: chain.currentStep,
+      recentThoughts: chain.thoughts.slice(-3), // Last 3 thoughts for context
+      totalThoughts: chain.thoughts.length
+    };
+  },
+  
+  // Complete the chain
+  completeChain(chainId, finalThought = null) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return false;
+    
+    if (finalThought) {
+      this.addThought(chainId, finalThought, 'conclusion');
+    }
+    
+    chain.status = 'completed';
+    chain.completedAt = new Date();
+    
+    return true;
+  },
+  
+  // Fail the chain
+  failChain(chainId, errorThought) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return false;
+    
+    this.addThought(chainId, errorThought, 'error');
+    chain.status = 'failed';
+    chain.completedAt = new Date();
+    
+    return true;
+  },
+  
+  // Get chain summary
+  getChainSummary(chainId) {
+    const chain = this.activeChains[chainId];
+    if (!chain) return null;
+    
+    return {
+      id: chain.id,
+      task: chain.task,
+      status: chain.status,
+      totalThoughts: chain.thoughts.length,
+      currentStep: chain.currentStep,
+      thoughts: chain.thoughts,
+      createdAt: chain.createdAt,
+      completedAt: chain.completedAt
+    };
+  },
+  
+  // Clear completed chains
+  clearCompletedChains() {
+    Object.keys(this.activeChains).forEach(chainId => {
+      if (this.activeChains[chainId].status === 'completed' || 
+          this.activeChains[chainId].status === 'failed') {
+        delete this.activeChains[chainId];
+      }
+    });
+  }
+};
+
 const initializeTools = () => {
   // Register common CAD operation tools
   registerShapeCreationTools();
@@ -126,6 +505,8 @@ const initializeTools = () => {
   registerUtilityTools();
   registerSketchingTools(); // Register 2D sketching tools
   registerCADOperationsTools(); // Register new structured CAD operations
+  registerDesignHistoryTools(); // Register AI-driven parametric design tools
+  registerChainOfThoughtTools(); // Register chain of thought management tools
 };
 
 /**
@@ -162,14 +543,34 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the cube'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the cube in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['width', 'height', 'depth']
     },
     execute: async (params) => {
       console.log('Creating cube with params:', params);
+      
+      // Record design intent in history
+      const intent = `Create a cube with dimensions ${params.width}x${params.height}x${params.depth}`;
+      const operationId = designHistory.recordOperation(
+        { toolName: 'create_cube', type: 'primitive_creation', ...params },
+        intent,
+        params
+      );
+      
       // Use the partsLibrary instead of duplicating code
-      return partsLibrary.createCube(params);
+      const result = partsLibrary.createCube(params);
+      
+      // Update history with result
+      if (result && !result.error) {
+        designHistory.markAsRegenerated(operationId, result);
+      }
+      
+      return result;
     }
   });
 
@@ -202,14 +603,34 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the cylinder'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the cylinder in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius', 'height']
     },
     execute: async (params) => {
       console.log('Creating cylinder with params:', params);
+      
+      // Record design intent in history
+      const intent = `Create a cylinder with radius ${params.radius} and height ${params.height}`;
+      const operationId = designHistory.recordOperation(
+        { toolName: 'create_cylinder', type: 'primitive_creation', ...params },
+        intent,
+        params
+      );
+      
       // Use the partsLibrary instead of duplicating code
-      return partsLibrary.createCylinder(params);
+      const result = partsLibrary.createCylinder(params);
+      
+      // Update history with result
+      if (result && !result.error) {
+        designHistory.markAsRegenerated(operationId, result);
+      }
+      
+      return result;
     }
   });
 
@@ -238,14 +659,34 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the sphere'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the sphere in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius']
     },
     execute: async (params) => {
       console.log('Creating sphere with params:', params);
+      
+      // Record design intent in history
+      const intent = `Create a sphere with radius ${params.radius}`;
+      const operationId = designHistory.recordOperation(
+        { toolName: 'create_sphere', type: 'primitive_creation', ...params },
+        intent,
+        params
+      );
+      
       // Use the partsLibrary instead of duplicating code
-      return partsLibrary.createSphere(params);
+      const result = partsLibrary.createSphere(params);
+      
+      // Update history with result
+      if (result && !result.error) {
+        designHistory.markAsRegenerated(operationId, result);
+      }
+      
+      return result;
     }
   });
 
@@ -278,6 +719,10 @@ const registerShapeCreationTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the torus'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the torus in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['innerRadius', 'outerRadius']
@@ -854,6 +1299,415 @@ const registerUtilityTools = () => {
       }
     }
   });
+  
+  // Multi-step Task Management tools
+  mcpClient.registerTool({
+    name: 'create_multi_step_task',
+    description: 'Creates a new multi-step task with a checklist of operations to complete. The agent will automatically execute all steps in sequence.',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Unique identifier for the task'
+        },
+        description: {
+          type: 'string',
+          description: 'Description of what the task accomplishes'
+        },
+        steps: {
+          type: 'array',
+          description: 'Array of step descriptions to complete',
+          items: {
+            type: 'string'
+          }
+        },
+        autoExecute: {
+          type: 'boolean',
+          description: 'Whether to automatically execute all steps (default: true)',
+          default: true
+        }
+      },
+      required: ['taskId', 'description', 'steps']
+    },
+    execute: async (params) => {
+      try {
+        const task = taskManager.createTask(params.taskId, params.description, params.steps);
+        
+        const result = {
+          success: true,
+          taskId: task.id,
+          description: task.description,
+          totalSteps: task.steps.length,
+          status: task.status,
+          message: `Created multi-step task: ${task.description} with ${task.steps.length} steps`
+        };
+
+        // If autoExecute is true (default), add instructions for the agent
+        if (params.autoExecute !== false) {
+          result.autoExecute = true;
+          result.executionInstructions = `Task created successfully. The agent should now automatically execute each step in sequence using the appropriate CAD tools. After each step, use complete_task_step to mark it as completed. For this table task, start with step 1: Create tabletop using create_cube, then create each leg using create_cylinder, and finally position and combine all parts.`;
+          result.nextAction = 'EXECUTE_STEPS';
+          result.taskSteps = task.steps.map(step => `${step.id}: ${step.description}`).join(', ');
+        }
+        
+        return result;
+      } catch (error) {
+        console.error('Error creating multi-step task:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  mcpClient.registerTool({
+    name: 'get_task_progress',
+    description: 'Gets the current progress of a multi-step task',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task to check'
+        }
+      },
+      required: ['taskId']
+    },
+    execute: async (params) => {
+      try {
+        const progress = taskManager.getTaskProgress(params.taskId);
+        
+        if (!progress) {
+          throw new Error(`Task with ID ${params.taskId} not found`);
+        }
+        
+        return {
+          success: true,
+          taskId: progress.taskId,
+          description: progress.description,
+          status: progress.status,
+          progress: progress.progress,
+          steps: progress.steps,
+          message: `Task progress: ${progress.progress.completed}/${progress.progress.total} steps completed (${progress.progress.percentage}%)`
+        };
+      } catch (error) {
+        console.error('Error getting task progress:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Enhanced task execution helper tool
+  mcpClient.registerTool({
+    name: 'execute_task_step',
+    description: 'Executes a specific step in a multi-step task and provides guidance on how to complete it',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task'
+        },
+        stepId: {
+          type: 'number',
+          description: 'ID of the step to execute'
+        },
+        stepDescription: {
+          type: 'string',
+          description: 'Description of what this step should accomplish'
+        }
+      },
+      required: ['taskId', 'stepId', 'stepDescription']
+    },
+    execute: async (params) => {
+      try {
+        const task = taskManager.getTask(params.taskId);
+        if (!task) {
+          throw new Error(`Task with ID ${params.taskId} not found`);
+        }
+
+        const step = task.steps.find(s => s.id === params.stepId);
+        if (!step) {
+          throw new Error(`Step ${params.stepId} not found in task ${params.taskId}`);
+        }
+
+        // Provide guidance based on the step description
+        let guidance = '';
+        let suggestedTools = [];
+
+        if (params.stepDescription.toLowerCase().includes('tabletop') || 
+            params.stepDescription.toLowerCase().includes('table top')) {
+          guidance = 'Create a rectangular table top using create_cube with appropriate dimensions (e.g., 120x80x3cm)';
+          suggestedTools = ['create_cube'];
+        } else if (params.stepDescription.toLowerCase().includes('leg')) {
+          guidance = 'Create a cylindrical leg using create_cylinder with appropriate radius and height (e.g., radius 5cm, height 70cm)';
+          suggestedTools = ['create_cylinder'];
+        } else if (params.stepDescription.toLowerCase().includes('combine') || 
+                   params.stepDescription.toLowerCase().includes('union')) {
+          guidance = 'Combine all parts using union_shapes to create the final assembly';
+          suggestedTools = ['union_shapes', 'list_models'];
+        } else if (params.stepDescription.toLowerCase().includes('position') || 
+                   params.stepDescription.toLowerCase().includes('move')) {
+          guidance = 'Position the component using translate_shape to the correct location';
+          suggestedTools = ['translate_shape', 'list_models'];
+        }
+
+        return {
+          success: true,
+          taskId: params.taskId,
+          stepId: params.stepId,
+          stepDescription: params.stepDescription,
+          guidance: guidance,
+          suggestedTools: suggestedTools,
+          message: `Ready to execute step ${params.stepId}: ${params.stepDescription}`,
+          nextAction: 'EXECUTE_STEP_WITH_GUIDANCE'
+        };
+      } catch (error) {
+        console.error('Error executing task step:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  mcpClient.registerTool({
+    name: 'complete_task_step',
+    description: 'Marks a step in a multi-step task as completed',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task'
+        },
+        stepId: {
+          type: 'number',
+          description: 'ID of the step to mark as completed'
+        },
+        result: {
+          type: 'string',
+          description: 'Optional result or note about the completed step'
+        }
+      },
+      required: ['taskId', 'stepId']
+    },
+    execute: async (params) => {
+      try {
+        const success = taskManager.completeStep(params.taskId, params.stepId, params.result);
+        
+        if (!success) {
+          throw new Error(`Failed to complete step ${params.stepId} in task ${params.taskId}`);
+        }
+        
+        const progress = taskManager.getTaskProgress(params.taskId);
+        
+        return {
+          success: true,
+          taskId: params.taskId,
+          stepId: params.stepId,
+          status: progress.status,
+          progress: progress.progress,
+          message: `Completed step ${params.stepId}. Progress: ${progress.progress.completed}/${progress.progress.total} steps (${progress.progress.percentage}%)`
+        };
+      } catch (error) {
+        console.error('Error completing task step:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  mcpClient.registerTool({
+    name: 'fail_task_step',
+    description: 'Marks a step in a multi-step task as failed',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'ID of the task'
+        },
+        stepId: {
+          type: 'number',
+          description: 'ID of the step that failed'
+        },
+        error: {
+          type: 'string',
+          description: 'Description of what went wrong'
+        }
+      },
+      required: ['taskId', 'stepId', 'error']
+    },
+    execute: async (params) => {
+      try {
+        const success = taskManager.failStep(params.taskId, params.stepId, params.error);
+        
+        if (!success) {
+          throw new Error(`Failed to mark step ${params.stepId} as failed in task ${params.taskId}`);
+        }
+        
+        return {
+          success: true,
+          taskId: params.taskId,
+          stepId: params.stepId,
+          status: 'failed',
+          message: `Marked step ${params.stepId} as failed: ${params.error}`
+        };
+      } catch (error) {
+        console.error('Error failing task step:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Set default color tool
+  mcpClient.registerTool({
+    name: 'set_default_model_color',
+    description: 'Sets the default color for all models. This color will be applied to all new models created.',
+    parameters: {
+      type: 'object',
+      properties: {
+        color: {
+          type: 'string',
+          description: 'Color in hex format (e.g., "#94a6b5") or CSS color name'
+        }
+      },
+      required: ['color']
+    },
+    execute: async (params) => {
+      console.log('Setting default model color:', params.color);
+      
+      try {
+        // Validate color format
+        const colorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$|^[a-zA-Z]+$/;
+        if (!colorRegex.test(params.color)) {
+          return {
+            success: false,
+            error: 'Invalid color format. Please use hex format (e.g., "#94a6b5") or CSS color name.'
+          };
+        }
+        
+        // Set the default color
+        modelStore.setDefaultColor(params.color);
+        
+        return {
+          success: true,
+          message: `Default model color set to ${params.color}. All new models will use this color.`,
+          defaultColor: params.color
+        };
+      } catch (error) {
+        console.error('Error setting default color:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Get default color tool
+  mcpClient.registerTool({
+    name: 'get_default_model_color',
+    description: 'Gets the current default color for models',
+    parameters: {
+      type: 'object',
+      properties: {}
+    },
+    execute: async (params) => {
+      console.log('Getting default model color');
+      
+      try {
+        const defaultColor = modelStore.getDefaultColor();
+        
+        return {
+          success: true,
+          defaultColor: defaultColor,
+          message: `Current default model color is ${defaultColor}`
+        };
+      } catch (error) {
+        console.error('Error getting default color:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Set model color tool
+  mcpClient.registerTool({
+    name: 'set_model_color',
+    description: 'Sets the color for a specific model',
+    parameters: {
+      type: 'object',
+      properties: {
+        modelId: {
+          type: 'string',
+          description: 'ID of the model to change color'
+        },
+        color: {
+          type: 'string',
+          description: 'Color in hex format (e.g., "#94a6b5") or CSS color name'
+        }
+      },
+      required: ['modelId', 'color']
+    },
+    execute: async (params) => {
+      console.log('Setting model color:', params);
+      
+      try {
+        // Validate color format
+        const colorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$|^[a-zA-Z]+$/;
+        if (!colorRegex.test(params.color)) {
+          return {
+            success: false,
+            error: 'Invalid color format. Please use hex format (e.g., "#94a6b5") or CSS color name.'
+          };
+        }
+        
+        // Set the model color
+        const success = modelStore.setModelColor(params.modelId, params.color);
+        
+        if (success) {
+          // Notify the viewer of the change
+          const modelData = modelStore.getModel(params.modelId);
+          if (modelData) {
+            notifyModelChanged(modelData);
+          }
+          
+          return {
+            success: true,
+            message: `Model ${params.modelId} color set to ${params.color}`,
+            modelId: params.modelId,
+            color: params.color
+          };
+        } else {
+          return {
+            success: false,
+            error: `Model ${params.modelId} not found`
+          };
+        }
+      } catch (error) {
+        console.error('Error setting model color:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
 };
 
 /**
@@ -1328,6 +2182,10 @@ const registerCADOperationsTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the sphere'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the sphere in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius']
@@ -1378,6 +2236,10 @@ const registerCADOperationsTools = () => {
         name: {
           type: 'string',
           description: 'Optional name for the cylinder'
+        },
+        color: {
+          type: 'string',
+          description: 'Optional color for the cylinder in hex format (e.g., "#94a6b5") or CSS color name. If not specified, uses the default model color.'
         }
       },
       required: ['radius', 'height']
@@ -1788,6 +2650,408 @@ const registerCADOperationsTools = () => {
           ? `Added circle with radius ${radius} to sketch` 
           : result.error
       };
+    }
+  });
+};
+
+/**
+ * Register tools for chain of thought management
+ */
+const registerChainOfThoughtTools = () => {
+  // Start Chain of Thought tool
+  mcpClient.registerTool({
+    name: 'start_chain_of_thought',
+    description: 'Starts a new chain of thought session to maintain focus on complex tasks',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'Unique identifier for the chain of thought session'
+        },
+        task: {
+          type: 'string',
+          description: 'Description of the task to focus on'
+        },
+        initialThought: {
+          type: 'string',
+          description: 'Optional initial thought or reasoning about the task'
+        }
+      },
+      required: ['chainId', 'task']
+    },
+    execute: async (params) => {
+      try {
+        const chain = chainOfThoughtManager.createChain(
+          params.chainId, 
+          params.task, 
+          params.initialThought
+        );
+        
+        return {
+          success: true,
+          chainId: chain.id,
+          task: chain.task,
+          status: chain.status,
+          message: `Started chain of thought for task: ${chain.task}`,
+          context: chainOfThoughtManager.getCurrentContext(chain.id)
+        };
+      } catch (error) {
+        console.error('Error starting chain of thought:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Add Thought tool
+  mcpClient.registerTool({
+    name: 'add_thought',
+    description: 'Adds a thought to the current chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        thought: {
+          type: 'string',
+          description: 'The thought or reasoning to add'
+        },
+        stepType: {
+          type: 'string',
+          description: 'Type of thought step',
+          enum: ['reasoning', 'action', 'observation', 'decision'],
+          default: 'reasoning'
+        }
+      },
+      required: ['chainId', 'thought']
+    },
+    execute: async (params) => {
+      try {
+        const thoughtEntry = chainOfThoughtManager.addThought(
+          params.chainId, 
+          params.thought, 
+          params.stepType
+        );
+        
+        if (!thoughtEntry) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          thoughtId: thoughtEntry.id,
+          stepNumber: thoughtEntry.stepNumber,
+          context: chainOfThoughtManager.getCurrentContext(params.chainId),
+          message: `Added thought ${thoughtEntry.id} to chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error adding thought:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Get Chain Context tool
+  mcpClient.registerTool({
+    name: 'get_chain_context',
+    description: 'Gets the current context of a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        }
+      },
+      required: ['chainId']
+    },
+    execute: async (params) => {
+      try {
+        const context = chainOfThoughtManager.getCurrentContext(params.chainId);
+        
+        if (!context) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          context: context,
+          message: `Retrieved context for chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error getting chain context:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Complete Chain tool
+  mcpClient.registerTool({
+    name: 'complete_chain_of_thought',
+    description: 'Completes a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        finalThought: {
+          type: 'string',
+          description: 'Optional final thought or conclusion'
+        }
+      },
+      required: ['chainId']
+    },
+    execute: async (params) => {
+      try {
+        const success = chainOfThoughtManager.completeChain(
+          params.chainId, 
+          params.finalThought
+        );
+        
+        if (!success) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        const summary = chainOfThoughtManager.getChainSummary(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          status: 'completed',
+          summary: summary,
+          message: `Completed chain of thought session ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error completing chain:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Fail Chain tool
+  mcpClient.registerTool({
+    name: 'fail_chain_of_thought',
+    description: 'Marks a chain of thought session as failed',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        errorThought: {
+          type: 'string',
+          description: 'Description of what went wrong or why the chain failed'
+        }
+      },
+      required: ['chainId', 'errorThought']
+    },
+    execute: async (params) => {
+      try {
+        const success = chainOfThoughtManager.failChain(
+          params.chainId, 
+          params.errorThought
+        );
+        
+        if (!success) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        const summary = chainOfThoughtManager.getChainSummary(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          status: 'failed',
+          summary: summary,
+          message: `Marked chain of thought session ${params.chainId} as failed`
+        };
+      } catch (error) {
+        console.error('Error failing chain:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Get Chain Summary tool
+  mcpClient.registerTool({
+    name: 'get_chain_summary',
+    description: 'Gets a complete summary of a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        }
+      },
+      required: ['chainId']
+    },
+    execute: async (params) => {
+      try {
+        const summary = chainOfThoughtManager.getChainSummary(params.chainId);
+        
+        if (!summary) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          summary: summary,
+          message: `Retrieved summary for chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error getting chain summary:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Chain of Thought Reasoning tool
+  mcpClient.registerTool({
+    name: 'chain_reasoning',
+    description: 'Performs structured reasoning within a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        reasoning: {
+          type: 'string',
+          description: 'The reasoning step to perform'
+        },
+        expectedOutcome: {
+          type: 'string',
+          description: 'What is expected to happen after this reasoning step'
+        }
+      },
+      required: ['chainId', 'reasoning']
+    },
+    execute: async (params) => {
+      try {
+        // Add the reasoning thought
+        const thoughtEntry = chainOfThoughtManager.addThought(
+          params.chainId, 
+          params.reasoning, 
+          'reasoning'
+        );
+        
+        if (!thoughtEntry) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        // Get current context
+        const context = chainOfThoughtManager.getCurrentContext(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          thoughtId: thoughtEntry.id,
+          stepNumber: thoughtEntry.stepNumber,
+          reasoning: params.reasoning,
+          expectedOutcome: params.expectedOutcome,
+          context: context,
+          message: `Added reasoning step ${thoughtEntry.id} to chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error in chain reasoning:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+  });
+
+  // Chain of Thought Decision tool
+  mcpClient.registerTool({
+    name: 'chain_decision',
+    description: 'Makes a decision within a chain of thought session',
+    parameters: {
+      type: 'object',
+      properties: {
+        chainId: {
+          type: 'string',
+          description: 'ID of the chain of thought session'
+        },
+        decision: {
+          type: 'string',
+          description: 'The decision being made'
+        },
+        rationale: {
+          type: 'string',
+          description: 'The rationale behind the decision'
+        },
+        nextAction: {
+          type: 'string',
+          description: 'What action will be taken based on this decision'
+        }
+      },
+      required: ['chainId', 'decision']
+    },
+    execute: async (params) => {
+      try {
+        // Create a comprehensive decision thought
+        const decisionThought = `DECISION: ${params.decision}\nRationale: ${params.rationale || 'Not provided'}\nNext Action: ${params.nextAction || 'To be determined'}`;
+        
+        const thoughtEntry = chainOfThoughtManager.addThought(
+          params.chainId, 
+          decisionThought, 
+          'decision'
+        );
+        
+        if (!thoughtEntry) {
+          throw new Error(`Chain with ID ${params.chainId} not found`);
+        }
+        
+        // Get current context
+        const context = chainOfThoughtManager.getCurrentContext(params.chainId);
+        
+        return {
+          success: true,
+          chainId: params.chainId,
+          thoughtId: thoughtEntry.id,
+          stepNumber: thoughtEntry.stepNumber,
+          decision: params.decision,
+          rationale: params.rationale,
+          nextAction: params.nextAction,
+          context: context,
+          message: `Added decision step ${thoughtEntry.id} to chain ${params.chainId}`
+        };
+      } catch (error) {
+        console.error('Error in chain decision:', error);
+        return {
+          success: false,
+          error: error.message
+        };
+      }
     }
   });
 };

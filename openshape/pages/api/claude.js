@@ -1,4 +1,4 @@
-// API route for proxying requests to Anthropic's Claude API
+// API route for proxying requests to Anthropic's API
 export default async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== 'POST') {
@@ -9,12 +9,12 @@ export default async function handler(req, res) {
     const body = req.body;
     
     // Get the API key from environment variables (server-side only)
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
-    const apiEndpoint = process.env.CLAUDE_API_ENDPOINT || process.env.NEXT_PUBLIC_CLAUDE_API_ENDPOINT || 'https://api.anthropic.com/v1/messages';
-    const model = process.env.CLAUDE_MODEL || process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-7-sonnet-20250219';
+    const apiKey = process.env.ANTHROPIC_API_KEY || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
+    const apiEndpoint = process.env.ANTHROPIC_API_ENDPOINT || process.env.NEXT_PUBLIC_ANTHROPIC_API_ENDPOINT || 'https://api.anthropic.com/v1/messages';
+    const model = process.env.ANTHROPIC_MODEL || process.env.NEXT_PUBLIC_ANTHROPIC_MODEL || 'claude-3-7-sonnet-20250219';
     
     if (!apiKey) {
-      console.error('No Claude API key found in environment variables');
+      console.error('No Anthropic API key found in environment variables');
       return res.status(500).json({ error: 'API key not configured' });
     }
 
@@ -23,7 +23,7 @@ export default async function handler(req, res) {
       body.model = model;
     }
 
-    console.log(`Proxying request to Claude API with model: ${body.model}`);
+    console.log(`Proxying request to Anthropic API with model: ${body.model}`);
     
     // Forward the request to Anthropic's API
     const response = await fetch(apiEndpoint, {
@@ -39,10 +39,10 @@ export default async function handler(req, res) {
     // Get the response
     const data = await response.json();
     
-    // Return the response from Claude
+    // Return the response from Anthropic
     return res.status(200).json(data);
   } catch (error) {
-    console.error('Claude API error:', error);
-    return res.status(500).json({ error: 'Failed to fetch from Claude API', details: error.message });
+    console.error('Anthropic API error:', error);
+    return res.status(500).json({ error: 'Failed to fetch from Anthropic API', details: error.message });
   }
 } 

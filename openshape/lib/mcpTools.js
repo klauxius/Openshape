@@ -1415,6 +1415,10 @@ const registerCADOperationsTools = () => {
         offset: {
           type: 'number',
           description: 'Offset of the plane from origin'
+        },
+        parameters: {
+          type: 'object',
+          description: 'Optional named numeric parameters that entity dimensions and the extrude height can reference by name, e.g. { "width": 12, "height": 8, "depth": 6 }'
         }
       },
       required: ['plane']
@@ -1867,6 +1871,48 @@ const registerCADOperationsTools = () => {
         success: result.success,
         message: result.success ? result.message : result.error,
         entityId: result.entityId
+      };
+    }
+  });
+
+  // Register Set Sketch Parameter (parametric variable)
+  mcpClient.registerTool({
+    name: 'cadSetSketchParameter',
+    description: 'Sets a named parameter on the active sketch and rebuilds every entity dimension and the extruded solid that references it. Bind a dimension to a parameter by passing its name as a string, e.g. cadAddRectangleToSketch({ width: "boxWidth" }).',
+    patterns: [
+      'set parameter {name} to {value}',
+      'change {name} to {value}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Parameter name' },
+        value: { type: 'number', description: 'New numeric value' }
+      },
+      required: ['name', 'value']
+    },
+    execute: async (params) => {
+      const result = CADOperations.setSketchParameter(params);
+      return {
+        success: result.success,
+        message: result.success ? `Set ${params.name} = ${params.value}` : result.error,
+        parameters: result.parameters
+      };
+    }
+  });
+
+  // Register Get Sketch Parameters
+  mcpClient.registerTool({
+    name: 'cadGetSketchParameters',
+    description: 'Returns the named parameters defined on the active sketch',
+    patterns: ['list sketch parameters', 'get parameters'],
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      const result = CADOperations.getSketchParameters();
+      return {
+        success: result.success,
+        parameters: result.parameters,
+        message: result.success ? `Parameters: ${JSON.stringify(result.parameters)}` : result.error
       };
     }
   });

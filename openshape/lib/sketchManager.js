@@ -58,6 +58,15 @@ class SketchManager {
       plane: planeInfo.plane,
       offset: planeInfo.offset || 0,
       entities: [],
+      // Named parametric variables that entity dimensions / the extrusion can
+      // reference by name. Changing one via setParameter() rebuilds everything
+      // that depends on it.
+      parameters: (planeInfo.parameters && typeof planeInfo.parameters === 'object')
+        ? { ...planeInfo.parameters }
+        : {},
+      // Link to the solid produced by extruding this sketch (kept so parameter
+      // changes can rebuild it in place).
+      extrusion: null,
       createdAt: new Date(),
       updatedAt: new Date(),
       isActive: true,
@@ -191,7 +200,13 @@ class SketchManager {
   // [Enhanced entity management with constraints and history]
   addEntity(type, params) {
     if (!this.activeSketch) throw new Error('No active sketch');
-    
+
+    // Resolve any parametric bindings: a dimension given as a parameter-name
+    // string (e.g. width: 'boxWidth') is recorded as a binding and replaced by
+    // the parameter's current numeric value for geometry generation.
+    const { resolved, bindings } = this.#resolveEntityParams(params);
+    params = resolved;
+
     // Apply grid snapping
     if (this.grid.snap) {
       params = this.#applyGridSnapping(type, params);
@@ -202,6 +217,7 @@ class SketchManager {
       id: entityId,
       type,
       params: this.#sanitizeParams(type, params),
+      bindings, // parameter-name bindings, e.g. { width: 'boxWidth' }
       createdAt: new Date(),
       updatedAt: new Date(),
       constraints: params.constraints || {}
@@ -602,6 +618,95 @@ class SketchManager {
     }
   }
 
+  // Split incoming params into resolved numeric params (for geometry) and a map
+  // of dimension->parameterName bindings for any dimension given as a string.
+  #resolveEntityParams(params) {
+    const bindings = {};
+    const resolved = { ...params };
+    const dimensionKeys = ['width', 'height', 'radius', 'innerRadius', 'outerRadius', 'size'];
+
+    for (const key of dimensionKeys) {
+      if (typeof resolved[key] === 'string') {
+        bindings[key] = resolved[key];
+        resolved[key] = this.#resolveValue(resolved[key]);
+      }
+    }
+
+    return { resolved, bindings };
+  }
+
+  // Resolve a value that may be a number or a parameter-name string.
+  #resolveValue(value) {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const params = this.activeSketch ? this.activeSketch.parameters : null;
+      if (params && typeof params[value] === 'number') return params[value];
+      const parsed = parseFloat(value);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+    return value;
+  }
+
+  // Define or update a named parameter and rebuild everything bound to it:
+  // every entity dimension bound to the parameter, and the linked extrusion.
+  setParameter(name, value) {
+    const sketch = this.activeSketch;
+    if (!sketch) throw new Error('No active sketch');
+    if (!name || typeof name !== 'string') throw new Error('Parameter name is required');
+
+    const numeric = typeof value === 'number' ? value : parseFloat(value);
+    if (Number.isNaN(numeric)) throw new Error(`Parameter value must be numeric, got: ${value}`);
+
+    sketch.parameters[name] = numeric;
+
+    // Update every entity dimension bound to this parameter.
+    for (const entity of [...sketch.entities]) {
+      if (!entity.bindings) continue;
+      const changed = {};
+      for (const [dimKey, paramName] of Object.entries(entity.bindings)) {
+        if (paramName === name) changed[dimKey] = numeric;
+      }
+      if (Object.keys(changed).length > 0) {
+        this.updateEntity(entity.id, changed);
+      }
+    }
+
+    // Rebuild the linked extrusion so the solid stays in sync.
+    if (sketch.extrusion) {
+      this.#rebuildExtrusion(sketch);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:parametersChanged', {
+        detail: { sketchId: sketch.id, name, value: numeric, parameters: { ...sketch.parameters } }
+      }));
+    }
+
+    return { ...sketch.parameters };
+  }
+
+  // Get the current parameter map for the active sketch.
+  getParameters() {
+    return this.activeSketch ? { ...this.activeSketch.parameters } : {};
+  }
+
+  // Rebuild the solid produced from a sketch's current profile + parametric
+  // extrude height, updating the existing model in place.
+  #rebuildExtrusion(sketch) {
+    const ext = sketch.extrusion;
+    if (!ext) return;
+
+    const profile = this.#buildExtrudableProfile(sketch);
+    if (!profile) return;
+
+    const height = this.#resolveValue(ext.height);
+    const extruded = jscad.extrusions.extrudeLinear({ height, twistAngle: 0 }, profile);
+    const oriented = this.#orientToSketchPlane(extruded, sketch);
+
+    modelStore.updateModel(ext.modelId, { geometry: oriented });
+    notifyModelChanged({ id: ext.modelId, geometry: oriented, isVisible: true });
+  }
+
   // [Layer management]
   toggleLayerVisibility(layerId) {
     const layer = this.layers[layerId];
@@ -626,20 +731,27 @@ class SketchManager {
 
     // Build a real 2D profile (JSCAD geom2) from the sketch's closed shapes.
     // Points and open segments are ignored - they can't define a solid.
-    const profile = this.#buildExtrudableProfile();
+    const profile = this.#buildExtrudableProfile(this.activeSketch);
     if (!profile) {
       throw new Error(
         'Sketch has no closed profile to extrude. Draw a rectangle, circle, or a closed loop of lines first.'
       );
     }
 
+    // Height may itself be parametric (a parameter-name string). Keep the
+    // authored value on the sketch so parameter changes can re-extrude.
+    const resolvedHeight = this.#resolveValue(height);
+
     // extrudeLinear extrudes a 2D profile along +Z; reorient the result onto
     // the sketch plane (and apply the plane offset) so YZ/XZ sketches extrude
     // along the correct axis.
-    const extruded = jscad.extrusions.extrudeLinear({ height, twistAngle: 0 }, profile);
-    const oriented = this.#orientToSketchPlane(extruded);
+    const extruded = jscad.extrusions.extrudeLinear({ height: resolvedHeight, twistAngle: 0 }, profile);
+    const oriented = this.#orientToSketchPlane(extruded, this.activeSketch);
 
     const modelId = modelStore.addModel(oriented, `extrusion_${this.activeSketch.id}`);
+    // Remember the sketch -> solid link (with the authored, possibly parametric
+    // height) so setParameter() can rebuild this solid in place.
+    this.activeSketch.extrusion = { modelId, height };
     notifyModelChanged({ id: modelId, geometry: oriented, isVisible: true });
 
     // Let the viewer frame the freshly created solid (e.g. isometric view) so
@@ -655,11 +767,11 @@ class SketchManager {
   // sketch. Rectangles and circles map directly to JSCAD primitives; connected
   // line segments are assembled into a closed polygon. Multiple profiles are
   // unioned together. Returns null when there is nothing extrudable.
-  #buildExtrudableProfile() {
+  #buildExtrudableProfile(sketch = this.activeSketch) {
     const profiles = [];
     const lineSegments = [];
 
-    for (const entity of this.activeSketch.entities) {
+    for (const entity of sketch.entities) {
       if (entity.type === 'rectangle') {
         const { center = [0, 0], width, height } = entity.params;
         if (width > 0 && height > 0) {
@@ -731,15 +843,15 @@ class SketchManager {
   // Reorient a solid that was extruded along +Z so it lies on the active
   // sketch plane, respecting the plane offset. Uses a 4x4 transform that maps
   // local axes (2D-x, 2D-y, extrude) onto the plane's world axes.
-  #orientToSketchPlane(solid) {
-    const offset = this.activeSketch.offset || 0;
+  #orientToSketchPlane(solid, sketch = this.activeSketch) {
+    const offset = sketch.offset || 0;
 
     let U; // world direction for the profile's local X (2D-x)
     let V; // world direction for the profile's local Y (2D-y)
     let W; // world direction for the extrusion (plane normal)
     let O; // world origin offset along the normal
 
-    switch (this.activeSketch.plane) {
+    switch (sketch.plane) {
       case 'yz':
         U = [0, 1, 0]; V = [0, 0, 1]; W = [1, 0, 0]; O = [offset, 0, 0];
         break;

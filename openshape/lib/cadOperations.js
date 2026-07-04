@@ -260,10 +260,10 @@ class CreateSketchOperation extends CADOperation {
   }
   
   execute() {
-    const { plane = 'xy', offset = 0, name } = this.params;
+    const { plane = 'xy', offset = 0, parameters, name } = this.params;
     
     try {
-      const sketch = sketchManager.createSketch({ plane, offset });
+      const sketch = sketchManager.createSketch({ plane, offset, parameters });
       
       // Add to history with undo/redo
       operationHistory.addOperation({
@@ -903,6 +903,28 @@ export const CADOperations = {
   addSketchRectangle: (params) => new AddSketchRectangleOperation(params).execute(),
   addSketchLine: (params) => new AddSketchLineOperation(params).execute(),
   extrudeSketch: (params) => new ExtrudeSketchOperation(params).execute(),
+
+  // Parametric sketch variables
+  setSketchParameter: (params = {}) => {
+    try {
+      const values = sketchManager.setParameter(params.name, params.value);
+      return {
+        success: true,
+        parameters: values,
+        message: `Set parameter ${params.name} = ${params.value}`
+      };
+    } catch (error) {
+      console.error('Failed to set sketch parameter:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  getSketchParameters: () => {
+    try {
+      return { success: true, parameters: sketchManager.getParameters() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
   
   // Point management
   getConnectionPoints: () => sketchManager.getConnectionPoints(),

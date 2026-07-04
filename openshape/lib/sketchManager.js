@@ -642,6 +642,12 @@ class SketchManager {
     const modelId = modelStore.addModel(oriented, `extrusion_${this.activeSketch.id}`);
     notifyModelChanged({ id: modelId, geometry: oriented, isVisible: true });
 
+    // Let the viewer frame the freshly created solid (e.g. isometric view) so
+    // the extruded 3D result is obvious instead of being seen edge-on.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:sketchExtruded', { detail: { modelId } }));
+    }
+
     return modelId;
   }
 

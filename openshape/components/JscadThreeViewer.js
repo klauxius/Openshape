@@ -727,6 +727,25 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
     };
   }, []);
 
+  // After a sketch is extruded, frame the new solid isometrically so its 3D
+  // form is immediately visible (a plane sketch is otherwise seen edge-on).
+  useEffect(() => {
+    const handleExtruded = () => {
+      // Defer so it runs after sketch mode exits and re-enables the controls.
+      setTimeout(() => {
+        if (!cameraRef.current || !controlsRef.current) return;
+        cameraRef.current.position.set(30, 30, 30);
+        cameraRef.current.lookAt(0, 0, 0);
+        controlsRef.current.enableRotate = true;
+        controlsRef.current.enableZoom = true;
+        controlsRef.current.update();
+      }, 60);
+    };
+
+    window.addEventListener('openshape:sketchExtruded', handleExtruded);
+    return () => window.removeEventListener('openshape:sketchExtruded', handleExtruded);
+  }, []);
+
   // Add keyboard shortcut to reset camera view for active sketch
   useEffect(() => {
     const handleKeyDown = (event) => {

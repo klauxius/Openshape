@@ -166,15 +166,14 @@ const SidebarFixed = ({ isOpen, onClose }) => {
       // The enterSketchMode function in the context menu will handle activating the sketch
     }
     
-    // Handle part library selection
-    if (id === 'part_cube') {
-      // Logic for selecting cube from library
-    } else if (id === 'part_sphere') {
-      // Logic for selecting sphere from library
-    } else if (id === 'part_cylinder') {
-      // Logic for selecting cylinder from library
-    } else if (id === 'part_torus') {
-      // Logic for selecting torus from library
+    // Handle part library selection - open the insert dialog for the chosen primitive.
+    // The main CAD interface listens for this event and shows the parameter dialog.
+    if (id.startsWith('part_')) {
+      const partType = id.replace('part_', '');
+      const event = new CustomEvent('openshape:requestInsertPart', {
+        detail: { partType }
+      });
+      window.dispatchEvent(event);
     }
   };
   

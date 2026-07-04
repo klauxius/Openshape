@@ -51,6 +51,13 @@ Next.js 15 (React 18) + Three.js + JSCAD. All app code lives in the `openshape/`
   parameter and rebuilds every bound entity dimension and the linked extruded solid in place;
   `cadGetSketchParameters()` reads them. Numeric literals still work (no binding). Use
   `window.openshapeCAD.measureModel(id)` to confirm resulting dimensions headlessly.
+- Datum planes: define a reference plane rigorously with `cadCreatePlane` — either an offset
+  plane (`{ basePlane:'xy'|'yz'|'xz', offset }`) or a general plane (`{ origin:[x,y,z],
+  normal:[x,y,z] }`) — then sketch on it via `cadCreateSketch({ planeId })`. Internally every
+  sketch carries a `frame` (origin + orthonormal `u`/`v`/`w`) in `lib/planeFrame.js`; the base
+  planes are just special-case frames, and all plane-aware math (2D↔3D transform, extrude
+  orientation, camera, click-to-draw raycast, outline rendering) routes through the frame, so
+  sketching/extruding works on arbitrary planes. `cadListPlanes` lists defined planes.
 - The built-in AI assistant only uses simulated (offline) tool-calling when `CLAUDE_API_KEY` /
   `NEXT_PUBLIC_CLAUDE_API_KEY` is set or `NEXT_PUBLIC_USE_SIMULATED_RESPONSES=true`; otherwise it
   replies that the API key is not configured. The `window.openshapeCAD` path needs neither.

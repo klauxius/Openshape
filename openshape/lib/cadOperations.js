@@ -490,6 +490,53 @@ class AddSketchRectangleOperation extends CADOperation {
   }
 }
 
+class AddSketchLineOperation extends CADOperation {
+  constructor(params = {}) {
+    super(params);
+    this.type = 'addSketchLine';
+    this.description = 'Add line to sketch';
+  }
+
+  execute() {
+    const { startPoint = [0, 0], endPoint = [10, 0] } = this.params;
+
+    try {
+      if (!sketchManager.getActiveSketch()) {
+        throw new Error('No active sketch');
+      }
+
+      const entity = sketchManager.addEntity('line', { startPoint, endPoint });
+
+      // Add to history with undo/redo
+      operationHistory.addOperation({
+        type: this.type,
+        params: this.params,
+        entityId: entity.id,
+        undo: () => {
+          sketchManager.deleteEntity(entity.id);
+        },
+        redo: () => {
+          sketchManager.addEntity('line', { startPoint, endPoint });
+        }
+      });
+
+      return {
+        entityId: entity.id,
+        success: true,
+        message: `Added line from [${startPoint.join(', ')}] to [${endPoint.join(', ')}] to sketch`
+      };
+    } catch (error) {
+      console.error('Failed to add line to sketch:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  toJscadCode() {
+    const { startPoint = [0, 0], endPoint = [10, 0] } = this.params;
+    return `// Add line from [${startPoint[0]}, ${startPoint[1]}] to [${endPoint[0]}, ${endPoint[1]}] to sketch\n`;
+  }
+}
+
 class ExtrudeSketchOperation extends CADOperation {
   constructor(params = {}) {
     super(params);
@@ -854,6 +901,7 @@ export const CADOperations = {
   connectPoints: (params) => new ConnectPointsOperation(params).execute(),
   addSketchCircle: (params) => new AddSketchCircleOperation(params).execute(),
   addSketchRectangle: (params) => new AddSketchRectangleOperation(params).execute(),
+  addSketchLine: (params) => new AddSketchLineOperation(params).execute(),
   extrudeSketch: (params) => new ExtrudeSketchOperation(params).execute(),
   
   // Point management

@@ -606,9 +606,23 @@ class MCPClient {
     // Drawing in sketch patterns
     else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['line']) && 
             this.matchesPattern(lowerMessage, ['in', 'to', 'on'], ['sketch'])) {
+      // Parse "from [x, y] to [x, y]" if provided, otherwise use a default segment.
+      let startPoint = [0, 0];
+      let endPoint = [10, 0];
+      const pointMatches = [...message.matchAll(/\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?/g)];
+      if (pointMatches.length >= 2) {
+        startPoint = [parseFloat(pointMatches[0][1]), parseFloat(pointMatches[0][2])];
+        endPoint = [parseFloat(pointMatches[1][1]), parseFloat(pointMatches[1][2])];
+      }
+
       return {
-        content: `To draw a line in the sketch, select the Line tool from the sketch toolbar and click two points to define the line.`,
-        systemMessage: "The system is currently in sketch mode. Please use the sketch tools to create geometry."
+        content: `I'll add a line from [${startPoint}] to [${endPoint}] in the sketch.`,
+        toolCalls: [
+          {
+            name: 'cadAddLineToSketch',
+            parameters: { startPoint, endPoint }
+          }
+        ]
       };
     }
     else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['circle']) && 
@@ -642,13 +656,37 @@ class MCPClient {
         ]
       };
     }
-    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['rectangle', 'polygon']) && 
+    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['rectangle']) && 
             this.matchesPattern(lowerMessage, ['in', 'to', 'on'], ['sketch'])) {
-      const shape = lowerMessage.includes('rectangle') ? 'rectangle' : 'polygon';
-      
+      // Parse dimensions like "10 by 6", "10x6", or "width 10 height 6".
+      let width = 10;
+      let height = 10;
+      let center = [0, 0];
+
+      const byMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:by|x|×|\*)\s*(\d+(?:\.\d+)?)/i);
+      if (byMatch) {
+        width = parseFloat(byMatch[1]);
+        height = parseFloat(byMatch[2]);
+      } else {
+        const widthMatch = message.match(/width\s*[=:]?\s*(\d+(?:\.\d+)?)/i);
+        const heightMatch = message.match(/height\s*[=:]?\s*(\d+(?:\.\d+)?)/i);
+        if (widthMatch) width = parseFloat(widthMatch[1]);
+        if (heightMatch) height = parseFloat(heightMatch[1]);
+      }
+
+      const centerMatch = message.match(/at\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?/i);
+      if (centerMatch) {
+        center = [parseFloat(centerMatch[1]), parseFloat(centerMatch[2])];
+      }
+
       return {
-        content: `To draw a ${shape} in the sketch, select the ${shape} tool from the sketch toolbar and define the shape parameters.`,
-        systemMessage: "The system is currently in sketch mode. Please use the sketch tools to create geometry."
+        content: `I'll add a ${width}×${height} rectangle at [${center}] to the sketch.`,
+        toolCalls: [
+          {
+            name: 'cadAddRectangleToSketch',
+            parameters: { center, width, height }
+          }
+        ]
       };
     }
     else if (this.matchesPattern(lowerMessage, ['exit', 'finish', 'end', 'close'], ['sketch'])) {
@@ -659,12 +697,17 @@ class MCPClient {
     }
     else if (this.matchesPattern(lowerMessage, ['extrude'], ['sketch'])) {
       // Extract height if present
-      const heightMatch = lowerMessage.match(/height\s+(\d+)/i) || lowerMessage.match(/(\d+)\s*mm/i);
+      const heightMatch = lowerMessage.match(/height\s+(\d+(?:\.\d+)?)/i) || lowerMessage.match(/(\d+(?:\.\d+)?)\s*mm/i);
       const height = heightMatch ? Number(heightMatch[1]) : 10;
       
       return {
         content: `I'll extrude the sketch to a height of ${height}mm.`,
-        systemMessage: "The system will prompt for extrusion height and extrude the current sketch."
+        toolCalls: [
+          {
+            name: 'cadExtrudeSketch',
+            parameters: { height }
+          }
+        ]
       };
     }
     // Default response if no pattern matches

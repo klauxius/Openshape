@@ -126,6 +126,7 @@ const initializeTools = () => {
   registerUtilityTools();
   registerSketchingTools(); // Register 2D sketching tools
   registerCADOperationsTools(); // Register new structured CAD operations
+  exposeHeadlessApi(); // Expose a headless entry point for programmatic/agent use
 };
 
 /**
@@ -1790,6 +1791,101 @@ const registerCADOperationsTools = () => {
       };
     }
   });
+
+  // Register Add Rectangle to Sketch
+  mcpClient.registerTool({
+    name: 'cadAddRectangleToSketch',
+    description: 'Creates a rectangle in the active sketch (an extrudable closed profile)',
+    patterns: [
+      'create a rectangle in the sketch',
+      'add a rectangle to the sketch',
+      'draw a rectangle on the sketch',
+      'make a rectangle {width} by {height}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        center: {
+          type: 'array',
+          description: 'Center position of the rectangle [x, y] in the sketch plane',
+          items: { type: 'number' }
+        },
+        width: { type: 'number', description: 'Width of the rectangle' },
+        height: { type: 'number', description: 'Height of the rectangle' }
+      },
+      required: ['width', 'height']
+    },
+    execute: async (params) => {
+      console.log('Adding rectangle to sketch with CADOperations:', params);
+      const center = params.center || [0, 0];
+      const width = params.width || 10;
+      const height = params.height || 10;
+
+      const result = CADOperations.addSketchRectangle({ center, width, height });
+
+      return {
+        success: result.success,
+        message: result.success
+          ? `Added ${width}×${height} rectangle to sketch`
+          : result.error
+      };
+    }
+  });
+
+  // Register Add Line to Sketch
+  mcpClient.registerTool({
+    name: 'cadAddLineToSketch',
+    description: 'Adds a line segment to the active sketch by its two endpoints. Chain segments into a closed loop to form an extrudable profile.',
+    patterns: [
+      'add a line to the sketch',
+      'draw a line in the sketch from {startPoint} to {endPoint}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        startPoint: {
+          type: 'array',
+          description: 'Start point of the line [x, y] in the sketch plane',
+          items: { type: 'number' }
+        },
+        endPoint: {
+          type: 'array',
+          description: 'End point of the line [x, y] in the sketch plane',
+          items: { type: 'number' }
+        }
+      },
+      required: ['startPoint', 'endPoint']
+    },
+    execute: async (params) => {
+      console.log('Adding line to sketch with CADOperations:', params);
+      const result = CADOperations.addSketchLine({
+        startPoint: params.startPoint || [0, 0],
+        endPoint: params.endPoint || [10, 0]
+      });
+
+      return {
+        success: result.success,
+        message: result.success ? result.message : result.error,
+        entityId: result.entityId
+      };
+    }
+  });
+};
+
+// Expose a minimal headless entry point so a non-GUI agent (or automated
+// test) can drive the MCP tools programmatically once the app has mounted and
+// initializeTools() has run. Example:
+//   await window.openshapeCAD.callTool('cadCreateSketch', { plane: 'xy' })
+//   await window.openshapeCAD.callTool('cadAddRectangleToSketch', { width: 10, height: 6 })
+//   await window.openshapeCAD.callTool('cadExtrudeSketch', { height: 5 })
+const exposeHeadlessApi = () => {
+  if (typeof window === 'undefined') return;
+  window.openshapeCAD = {
+    callTool: (name, parameters = {}) => mcpClient.executeToolCall({ name, parameters }),
+    listTools: () => mcpClient.tools.map(t => ({ name: t.name, description: t.description })),
+    getToolDefinitions: () => mcpClient.getToolDefinitions(),
+    client: mcpClient
+  };
 };
 
 // Export initializeTools as the default export

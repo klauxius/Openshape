@@ -11,6 +11,37 @@ import MeasurementTool from './measurements/MeasurementTool';
 import MeasurementControls from './measurements/MeasurementControls';
 import ReferencePlanes from './ReferencePlanes';
 import { Ruler, Layers } from 'lucide-react';
+import sketchManager from '../lib/sketchManager';
+
+// Math plane (in world space) that a sketch on the given plane/offset lives on.
+// Used to raycast canvas clicks onto the active sketch plane while drawing.
+const getSketchThreePlane = (planeType, offset = 0) => {
+  switch (planeType) {
+    case 'yz':
+      return new THREE.Plane(new THREE.Vector3(1, 0, 0), -offset);
+    case 'xz':
+      return new THREE.Plane(new THREE.Vector3(0, 1, 0), -offset);
+    case 'xy':
+    case 'custom':
+    default:
+      return new THREE.Plane(new THREE.Vector3(0, 0, 1), -offset);
+  }
+};
+
+// Convert a world-space point on the sketch plane back into the sketch's local
+// 2D coordinates. Inverse of SketchManager.transformToSketchPlane.
+const worldPointToSketch2D = (planeType, point) => {
+  switch (planeType) {
+    case 'yz':
+      return [point.y, point.z];
+    case 'xz':
+      return [point.x, point.z];
+    case 'xy':
+    case 'custom':
+    default:
+      return [point.x, point.y];
+  }
+};
 
 // Performance configuration object - easily tune performance settings
 const PERFORMANCE_CONFIG = {
@@ -352,6 +383,12 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
   // Store camera positions for each sketch to restore them when switching
   const sketchCameraPositionsRef = useRef({});
 
+  // Mutable sketch-drawing state consumed by the (once-mounted) click handler.
+  // Refs avoid stale closures inside the long-lived canvas event listener.
+  const sketchStateRef = useRef({ active: false, plane: null, offset: 0 });
+  const sketchToolRef = useRef('select');
+  const sketchDrawRef = useRef({ firstPoint: null });
+
   // Define standard camera positions for each plane type
   const standardCameraPositions = {
     xy: { position: [0, 0, 15], target: [0, 0, 0] },
@@ -652,6 +689,41 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
     
     return () => {
       window.removeEventListener('openshape:sketchCreated', handleSketchCreated);
+    };
+  }, []);
+
+  // Keep sketch drawing refs in sync so the canvas click handler knows the
+  // active plane, offset, and selected drawing tool.
+  useEffect(() => {
+    const setSketchState = (detail) => {
+      const { active, sketch, plane, offset } = detail || {};
+      if (active) {
+        sketchStateRef.current = {
+          active: true,
+          plane: plane || (sketch ? sketch.plane : 'xy'),
+          offset: (sketch ? sketch.offset : offset) || 0
+        };
+      } else {
+        sketchStateRef.current = { active: false, plane: null, offset: 0 };
+      }
+      sketchDrawRef.current = { firstPoint: null };
+    };
+
+    const handleModeChanged = (event) => setSketchState(event.detail);
+    const handleCreated = (event) => setSketchState({ ...event.detail, active: true });
+    const handleToolChanged = (event) => {
+      sketchToolRef.current = (event.detail && event.detail.tool) || 'select';
+      sketchDrawRef.current = { firstPoint: null };
+    };
+
+    window.addEventListener('openshape:sketchModeChanged', handleModeChanged);
+    window.addEventListener('openshape:sketchCreated', handleCreated);
+    window.addEventListener('openshape:sketchToolChanged', handleToolChanged);
+
+    return () => {
+      window.removeEventListener('openshape:sketchModeChanged', handleModeChanged);
+      window.removeEventListener('openshape:sketchCreated', handleCreated);
+      window.removeEventListener('openshape:sketchToolChanged', handleToolChanged);
     };
   }, []);
 
@@ -1003,8 +1075,76 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         
         renderer.domElement.addEventListener('mousemove', handleMouseMove);
         
+        // Handle sketch drawing clicks: raycast the click onto the active sketch
+        // plane and add the corresponding 2D entity. Multi-click tools (line,
+        // rectangle, circle) accumulate a first point before completing.
+        const onSketchClick = (event) => {
+          const sketchState = sketchStateRef.current;
+          const tool = sketchToolRef.current;
+          if (!sketchState.active) return false;
+          if (!['point', 'line', 'rectangle', 'circle'].includes(tool)) return false;
+          if (!cameraRef.current) return false;
+
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, cameraRef.current);
+
+          const mathPlane = getSketchThreePlane(sketchState.plane, sketchState.offset);
+          const hit = new THREE.Vector3();
+          if (!raycaster.ray.intersectPlane(mathPlane, hit)) return true;
+
+          const p = worldPointToSketch2D(sketchState.plane, hit);
+
+          try {
+            if (tool === 'point') {
+              sketchManager.addEntity('point', { position: p });
+            } else if (tool === 'line') {
+              if (!sketchDrawRef.current.firstPoint) {
+                sketchDrawRef.current.firstPoint = p;
+              } else {
+                sketchManager.addEntity('line', {
+                  startPoint: sketchDrawRef.current.firstPoint,
+                  endPoint: p
+                });
+                sketchDrawRef.current.firstPoint = null;
+              }
+            } else if (tool === 'rectangle') {
+              if (!sketchDrawRef.current.firstPoint) {
+                sketchDrawRef.current.firstPoint = p;
+              } else {
+                const a = sketchDrawRef.current.firstPoint;
+                const center = [(a[0] + p[0]) / 2, (a[1] + p[1]) / 2];
+                const width = Math.abs(p[0] - a[0]);
+                const height = Math.abs(p[1] - a[1]);
+                if (width > 0 && height > 0) {
+                  sketchManager.addEntity('rectangle', { center, width, height });
+                }
+                sketchDrawRef.current.firstPoint = null;
+              }
+            } else if (tool === 'circle') {
+              if (!sketchDrawRef.current.firstPoint) {
+                sketchDrawRef.current.firstPoint = p;
+              } else {
+                const c = sketchDrawRef.current.firstPoint;
+                const radius = Math.hypot(p[0] - c[0], p[1] - c[1]);
+                if (radius > 0) {
+                  sketchManager.addEntity('circle', { center: c, radius });
+                }
+                sketchDrawRef.current.firstPoint = null;
+              }
+            }
+          } catch (err) {
+            console.error('[JscadThreeViewer] Failed to add sketch entity:', err);
+          }
+          return true;
+        };
+
         // Handle mouse clicks for measurements
         const onMouseClick = (event) => {
+          // Sketch drawing takes priority when a sketch tool is active.
+          if (onSketchClick(event)) return;
+
           if (!measurementMode || !measurementToolRef.current) return;
           
           // Calculate mouse position in normalized device coordinates

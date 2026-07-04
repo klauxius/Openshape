@@ -36,55 +36,18 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
     
     window.addEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
     
-    // Set up tool-specific event handling
-    const handleCanvasClick = (event) => {
-      // Only handle clicks if we're in a sketch tool mode that requires point selection
-      if (!['point', 'line', 'circle'].includes(activeTool)) return;
-      
-      // Convert screen coordinates to model coordinates
-      const viewer = document.getElementById('jscad-three-viewer');
-      if (!viewer || !viewer.__jscadViewer) return;
-      
-      const viewerRect = viewer.getBoundingClientRect();
-      const x = ((event.clientX - viewerRect.left) / viewerRect.width) * 2 - 1;
-      const y = -((event.clientY - viewerRect.top) / viewerRect.height) * 2 + 1;
-      
-      // Scale to model space - using a factor of 10 to make points more visible
-      const modelX = x * 10;
-      const modelY = y * 10;
-      
-      try {
-        if (activeTool === 'point') {
-          // Add a point at the clicked position
-          sketchManager.addEntity('point', {
-            position: [modelX, modelY, 0],
-            size: 0.2
-          });
-        } else if (activeTool === 'line') {
-          // Handle line tool (to be implemented)
-          // This would need to track first point, then second point
-        } else if (activeTool === 'circle') {
-          // For circle tool implementation
-          // This simple version creates a circle at the clicked position with a fixed radius
-          // A more advanced version would let the user click for center, then drag for radius
-          sketchManager.addEntity('circle', {
-            center: [modelX, modelY],
-            radius: 3 // Default radius of 3 units
-          });
-          
-          console.log(`Created circle at [${modelX}, ${modelY}] with radius 3`);
-        }
-      } catch (error) {
-        console.error(`Failed to add ${activeTool}:`, error);
-      }
-    };
-    
-    document.addEventListener('click', handleCanvasClick);
-    
     return () => {
       window.removeEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
-      document.removeEventListener('click', handleCanvasClick);
+      // Reset the drawing tool in the viewer when leaving sketch mode
+      window.dispatchEvent(new CustomEvent('openshape:sketchToolChanged', { detail: { tool: 'select' } }));
+      if (document.body) document.body.style.cursor = 'auto';
     };
+  }, []);
+
+  // Broadcast the active drawing tool so the 3D viewer can turn canvas clicks
+  // into sketch geometry on the active plane.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('openshape:sketchToolChanged', { detail: { tool: activeTool } }));
   }, [activeTool]);
   
   if (!activeSketch) return null;
@@ -92,28 +55,12 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
   const handleToolSelect = (tool) => {
     setActiveTool(tool);
     
-    // Reset any active operations
-    const viewer = document.getElementById('jscad-three-viewer');
-    if (viewer && viewer.__jscadViewer) {
-      // Clear any temporary entities or guides
-    }
-    
     // Update cursor style based on selected tool
     if (document.body) {
-      // Reset cursor style
-      document.body.style.cursor = 'auto';
-      
-      // Set appropriate cursor for each tool
       switch (tool) {
-        case 'select':
-          document.body.style.cursor = 'default';
-          break;
         case 'point':
-          document.body.style.cursor = 'crosshair';
-          break;
         case 'line':
-          document.body.style.cursor = 'crosshair';
-          break;
+        case 'rectangle':
         case 'circle':
           document.body.style.cursor = 'crosshair';
           break;
@@ -121,8 +68,17 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
           document.body.style.cursor = 'default';
       }
     }
-    
-    console.log(`Selected tool: ${tool}`);
+  };
+
+  // Short instruction shown for the active tool
+  const toolHints = {
+    select: 'Pick a tool, draw a closed profile, then Extrude',
+    point: 'Click on the plane to place a point',
+    line: 'Click start point, then end point',
+    rectangle: 'Click two opposite corners',
+    circle: 'Click the center, then a point on the radius',
+    polygon: 'Polygon tool not yet available',
+    text: 'Text tool not yet available'
   };
   
   const handleExtrudeClick = () => {
@@ -170,7 +126,7 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
       <div className="p-2 flex items-center">
         <div className="mr-4 font-medium text-blue-600">
           Sketch Mode: {activeSketch.name}
-          <span className="ml-2 text-xs text-gray-500">(Camera rotation locked)</span>
+          <span className="ml-2 text-xs text-gray-500 font-normal">{toolHints[activeTool] || '(Camera rotation locked)'}</span>
         </div>
         
         <div className="border-r border-gray-300 h-8 mx-2"></div>

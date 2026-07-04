@@ -619,41 +619,143 @@ class SketchManager {
   }
 
   // [Enhanced extrusion validation]
-  extrudeActiveSketch(height) {
+  extrudeActiveSketch(height = 5) {
     if (!this.activeSketch || this.activeSketch.entities.length === 0) {
       throw new Error('No active sketch or sketch is empty');
     }
 
-    const sketchGeometries = this.activeSketch.entities
-      .map(entity => modelStore.getModel(entity.modelId)?.geometry)
-      .filter(Boolean);
-
-    if (sketchGeometries.length === 0) {
-      throw new Error('No valid geometries in sketch');
-    }
-
-    try {
-      jscad.measurements.measureVolume(
-        jscad.booleans.union(sketchGeometries)
+    // Build a real 2D profile (JSCAD geom2) from the sketch's closed shapes.
+    // Points and open segments are ignored - they can't define a solid.
+    const profile = this.#buildExtrudableProfile();
+    if (!profile) {
+      throw new Error(
+        'Sketch has no closed profile to extrude. Draw a rectangle, circle, or a closed loop of lines first.'
       );
-    } catch (e) {
-      throw new Error('Invalid geometry for extrusion');
     }
 
-    // Create extrusion
-    const unionGeometry = jscad.booleans.union(sketchGeometries);
-    const extruded = jscad.extrusions.extrudeLinear(
-      { height, twistAngle: 0 }, 
-      unionGeometry
-    );
-    
-    // Add it to model store
-    const modelId = modelStore.addModel(extruded, `extrusion_${this.activeSketch.id}`);
-    
-    // Notify about the new model
-    notifyModelChanged({ id: modelId, geometry: extruded, isVisible: true });
-    
+    // extrudeLinear extrudes a 2D profile along +Z; reorient the result onto
+    // the sketch plane (and apply the plane offset) so YZ/XZ sketches extrude
+    // along the correct axis.
+    const extruded = jscad.extrusions.extrudeLinear({ height, twistAngle: 0 }, profile);
+    const oriented = this.#orientToSketchPlane(extruded);
+
+    const modelId = modelStore.addModel(oriented, `extrusion_${this.activeSketch.id}`);
+    notifyModelChanged({ id: modelId, geometry: oriented, isVisible: true });
+
     return modelId;
+  }
+
+  // Build a single 2D profile (geom2) from the closed shapes in the active
+  // sketch. Rectangles and circles map directly to JSCAD primitives; connected
+  // line segments are assembled into a closed polygon. Multiple profiles are
+  // unioned together. Returns null when there is nothing extrudable.
+  #buildExtrudableProfile() {
+    const profiles = [];
+    const lineSegments = [];
+
+    for (const entity of this.activeSketch.entities) {
+      if (entity.type === 'rectangle') {
+        const { center = [0, 0], width, height } = entity.params;
+        if (width > 0 && height > 0) {
+          profiles.push(jscad.primitives.rectangle({ size: [width, height], center }));
+        }
+      } else if (entity.type === 'circle') {
+        const { center = [0, 0], radius } = entity.params;
+        if (radius > 0) {
+          profiles.push(jscad.primitives.circle({ radius, center, segments: 64 }));
+        }
+      } else if (entity.type === 'line') {
+        const { startPoint, endPoint } = entity.params;
+        if (startPoint && endPoint) {
+          lineSegments.push([startPoint, endPoint]);
+        }
+      }
+    }
+
+    // Try to turn connected line segments into a closed polygon profile.
+    const loop = this.#assembleClosedLoop(lineSegments);
+    if (loop && loop.length >= 3) {
+      try {
+        profiles.push(jscad.geometries.geom2.fromPoints(loop));
+      } catch (e) {
+        console.warn('[SketchManager] Could not build polygon from line segments:', e);
+      }
+    }
+
+    if (profiles.length === 0) return null;
+    return profiles.length === 1 ? profiles[0] : jscad.booleans.union(profiles);
+  }
+
+  // Chain 2D line segments into an ordered, closed loop of vertices.
+  // Returns null if the segments do not form a single closed loop.
+  #assembleClosedLoop(segments) {
+    if (!segments || segments.length < 3) return null;
+
+    const tol = 1e-6;
+    const eq = (a, b) => Math.abs(a[0] - b[0]) < tol && Math.abs(a[1] - b[1]) < tol;
+
+    const remaining = segments.map(s => [[...s[0]], [...s[1]]]);
+    const start = remaining[0][0];
+    const path = [start, remaining[0][1]];
+    remaining.splice(0, 1);
+
+    while (remaining.length > 0) {
+      const tail = path[path.length - 1];
+      let idx = -1;
+      let next = null;
+      for (let i = 0; i < remaining.length; i++) {
+        if (eq(remaining[i][0], tail)) { idx = i; next = remaining[i][1]; break; }
+        if (eq(remaining[i][1], tail)) { idx = i; next = remaining[i][0]; break; }
+      }
+      if (idx === -1) return null; // open or disconnected chain
+
+      remaining.splice(idx, 1);
+
+      // Closing segment consumed and loop returns to the start: done.
+      if (remaining.length === 0 && eq(next, start)) {
+        return path;
+      }
+      path.push(next);
+    }
+
+    // All segments consumed and the chain closes back to the start.
+    return eq(path[path.length - 1], start) ? path.slice(0, -1) : null;
+  }
+
+  // Reorient a solid that was extruded along +Z so it lies on the active
+  // sketch plane, respecting the plane offset. Uses a 4x4 transform that maps
+  // local axes (2D-x, 2D-y, extrude) onto the plane's world axes.
+  #orientToSketchPlane(solid) {
+    const offset = this.activeSketch.offset || 0;
+
+    let U; // world direction for the profile's local X (2D-x)
+    let V; // world direction for the profile's local Y (2D-y)
+    let W; // world direction for the extrusion (plane normal)
+    let O; // world origin offset along the normal
+
+    switch (this.activeSketch.plane) {
+      case 'yz':
+        U = [0, 1, 0]; V = [0, 0, 1]; W = [1, 0, 0]; O = [offset, 0, 0];
+        break;
+      case 'xz':
+        U = [1, 0, 0]; V = [0, 0, 1]; W = [0, 1, 0]; O = [0, offset, 0];
+        break;
+      case 'xy':
+      case 'custom':
+      default:
+        U = [1, 0, 0]; V = [0, 1, 0]; W = [0, 0, 1]; O = [0, 0, offset];
+        break;
+    }
+
+    // Column-major 4x4 matrix: columns are U, V, W, and the origin translation.
+    const matrix = [
+      U[0], U[1], U[2], 0,
+      V[0], V[1], V[2], 0,
+      W[0], W[1], W[2], 0,
+      O[0], O[1], O[2], 1
+    ];
+
+    return jscad.transforms.transform(matrix, solid);
   }
 
   // [Selection management]

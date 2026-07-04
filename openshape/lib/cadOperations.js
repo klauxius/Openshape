@@ -4,6 +4,7 @@
 import * as jscad from '@jscad/modeling';
 import { modelStore, notifyModelChanged } from './mcpTools';
 import sketchManager from './sketchManager';
+import planeManager from './planeManager';
 
 // Notify observers about operation history changes
 const notifyOperationHistoryChanged = () => {
@@ -260,10 +261,10 @@ class CreateSketchOperation extends CADOperation {
   }
   
   execute() {
-    const { plane = 'xy', offset = 0, parameters, name } = this.params;
+    const { plane = 'xy', offset = 0, parameters, planeId, frame, name } = this.params;
     
     try {
-      const sketch = sketchManager.createSketch({ plane, offset, parameters });
+      const sketch = sketchManager.createSketch({ plane, offset, parameters, planeId, frame });
       
       // Add to history with undo/redo
       operationHistory.addOperation({
@@ -903,6 +904,42 @@ export const CADOperations = {
   addSketchRectangle: (params) => new AddSketchRectangleOperation(params).execute(),
   addSketchLine: (params) => new AddSketchLineOperation(params).execute(),
   extrudeSketch: (params) => new ExtrudeSketchOperation(params).execute(),
+
+  // Datum planes
+  createPlane: (params = {}) => {
+    try {
+      let plane;
+      if (params.normal) {
+        plane = planeManager.createPlaneFromNormal({
+          origin: params.origin || [0, 0, 0],
+          normal: params.normal,
+          name: params.name
+        });
+      } else {
+        plane = planeManager.createOffsetPlane({
+          basePlane: params.basePlane || 'xy',
+          offset: params.offset || 0,
+          name: params.name
+        });
+      }
+      return {
+        success: true,
+        planeId: plane.id,
+        name: plane.name,
+        message: `Created datum plane ${plane.name} (${plane.id})`
+      };
+    } catch (error) {
+      console.error('Failed to create plane:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  listPlanes: () => {
+    try {
+      return { success: true, planes: planeManager.list() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
 
   // Parametric sketch variables
   setSketchParameter: (params = {}) => {

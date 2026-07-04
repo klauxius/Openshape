@@ -1416,12 +1416,16 @@ const registerCADOperationsTools = () => {
           type: 'number',
           description: 'Offset of the plane from origin'
         },
+        planeId: {
+          type: 'string',
+          description: 'Optional id of a datum plane (from cadCreatePlane) to sketch on. When provided, plane/offset are ignored.'
+        },
         parameters: {
           type: 'object',
           description: 'Optional named numeric parameters that entity dimensions and the extrude height can reference by name, e.g. { "width": 12, "height": 8, "depth": 6 }'
         }
       },
-      required: ['plane']
+      required: []
     },
     execute: async (params) => {
       console.log('Creating sketch with CADOperations:', params);
@@ -1871,6 +1875,51 @@ const registerCADOperationsTools = () => {
         success: result.success,
         message: result.success ? result.message : result.error,
         entityId: result.entityId
+      };
+    }
+  });
+
+  // Register Create Datum Plane
+  mcpClient.registerTool({
+    name: 'cadCreatePlane',
+    description: 'Defines a new datum/reference plane. Either an offset plane (parallel to a base plane at a signed distance) or a general plane from an origin point and a normal vector. Returns a planeId to pass to cadCreateSketch.',
+    patterns: [
+      'create a plane offset {offset} from {basePlane}',
+      'add a datum plane',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        basePlane: { type: 'string', description: 'Base plane for an offset plane (xy, yz, or xz)', enum: ['xy', 'yz', 'xz'] },
+        offset: { type: 'number', description: 'Signed offset distance from the base plane, along its normal' },
+        origin: { type: 'array', description: 'Origin [x, y, z] for a general plane', items: { type: 'number' } },
+        normal: { type: 'array', description: 'Normal vector [x, y, z] for a general plane', items: { type: 'number' } },
+        name: { type: 'string', description: 'Optional name for the plane' }
+      },
+      required: []
+    },
+    execute: async (params) => {
+      const result = CADOperations.createPlane(params);
+      return {
+        success: result.success,
+        planeId: result.planeId,
+        message: result.success ? result.message : result.error
+      };
+    }
+  });
+
+  // Register List Datum Planes
+  mcpClient.registerTool({
+    name: 'cadListPlanes',
+    description: 'Lists the datum planes that have been defined',
+    patterns: ['list planes', 'list datum planes'],
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      const result = CADOperations.listPlanes();
+      return {
+        success: result.success,
+        planes: result.planes,
+        message: result.success ? `${result.planes.length} datum plane(s)` : result.error
       };
     }
   });

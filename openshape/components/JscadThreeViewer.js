@@ -13,33 +13,40 @@ import ReferencePlanes from './ReferencePlanes';
 import { Ruler, Layers } from 'lucide-react';
 import sketchManager from '../lib/sketchManager';
 
-// Math plane (in world space) that a sketch on the given plane/offset lives on.
-// Used to raycast canvas clicks onto the active sketch plane while drawing.
-const getSketchThreePlane = (planeType, offset = 0) => {
-  switch (planeType) {
-    case 'yz':
-      return new THREE.Plane(new THREE.Vector3(1, 0, 0), -offset);
-    case 'xz':
-      return new THREE.Plane(new THREE.Vector3(0, 1, 0), -offset);
-    case 'xy':
-    case 'custom':
-    default:
-      return new THREE.Plane(new THREE.Vector3(0, 0, 1), -offset);
-  }
+// Math plane (in world space) that the active sketch's frame lives on. Used to
+// raycast canvas clicks onto the sketch plane while drawing.
+const getSketchThreePlane = (frame) => {
+  const plane = new THREE.Plane();
+  const normal = new THREE.Vector3(frame.w[0], frame.w[1], frame.w[2]).normalize();
+  const origin = new THREE.Vector3(frame.origin[0], frame.origin[1], frame.origin[2]);
+  plane.setFromNormalAndCoplanarPoint(normal, origin);
+  return plane;
 };
 
 // Convert a world-space point on the sketch plane back into the sketch's local
-// 2D coordinates. Inverse of SketchManager.transformToSketchPlane.
-const worldPointToSketch2D = (planeType, point) => {
-  switch (planeType) {
-    case 'yz':
-      return [point.y, point.z];
-    case 'xz':
-      return [point.x, point.z];
-    case 'xy':
-    case 'custom':
-    default:
-      return [point.x, point.y];
+// 2D coordinates (inverse of SketchManager.transformToSketchPlane / frame.to3D).
+const worldPointToSketch2D = (frame, point) => {
+  const d = new THREE.Vector3(
+    point.x - frame.origin[0],
+    point.y - frame.origin[1],
+    point.z - frame.origin[2]
+  );
+  const u = new THREE.Vector3(frame.u[0], frame.u[1], frame.u[2]);
+  const v = new THREE.Vector3(frame.v[0], frame.v[1], frame.v[2]);
+  return [d.dot(u), d.dot(v)];
+};
+
+// Position the camera to look straight at a sketch frame (any orientation).
+const positionCameraForFrame = (frame, camera, controls, distance = 15) => {
+  const origin = new THREE.Vector3(frame.origin[0], frame.origin[1], frame.origin[2]);
+  const normal = new THREE.Vector3(frame.w[0], frame.w[1], frame.w[2]).normalize();
+  const up = new THREE.Vector3(frame.v[0], frame.v[1], frame.v[2]).normalize();
+  camera.position.copy(origin.clone().add(normal.multiplyScalar(distance)));
+  camera.up.copy(up);
+  camera.lookAt(origin);
+  if (controls) {
+    controls.target.copy(origin);
+    controls.update();
   }
 };
 
@@ -217,9 +224,12 @@ function jscadToThreeGeometry(jscadGeometry) {
       const positions = [];
       const indices = [];
       
-      // Extract points (2D) and add Z coordinate for 3D space
+      // Prefer the frame-mapped 3D points (set by SketchManager for any plane).
+      // Fall back to the legacy XY+offset mapping for older geometries.
       const offset = jscadGeometry.metadata?.sketchOffset || 0;
-      const points3D = jscadGeometry.points.map(p => [p[0], p[1], offset]);
+      const points3D = Array.isArray(jscadGeometry.metadata?.points3D)
+        ? jscadGeometry.metadata.points3D
+        : jscadGeometry.points.map(p => [p[0], p[1], offset]);
       
       // For sketch entities like circles, we want to create a line loop
       for (let i = 0; i < points3D.length; i++) {
@@ -385,7 +395,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
 
   // Mutable sketch-drawing state consumed by the (once-mounted) click handler.
   // Refs avoid stale closures inside the long-lived canvas event listener.
-  const sketchStateRef = useRef({ active: false, plane: null, offset: 0 });
+  const sketchStateRef = useRef({ active: false, plane: null, offset: 0, frame: null });
   const sketchToolRef = useRef('select');
   const sketchDrawRef = useRef({ firstPoint: null });
 
@@ -565,6 +575,13 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         // Store the sketch plane for reference
         const sketchPlane = plane || (sketch ? sketch.plane : 'xy');
         setActiveSketchPlane(sketchPlane);
+
+        // Orient the camera to look straight at the sketch's frame (works for
+        // base, offset, and arbitrary planes).
+        if (sketch && sketch.frame) {
+          positionCameraForFrame(sketch.frame, cameraRef.current, controlsRef.current);
+          return;
+        }
         
         // Determine if we have a stored camera position for this sketch
         const sketchId = sketch ? sketch.id : null;
@@ -651,10 +668,20 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
       
       // If camera and controls are ready, set the view and disable rotation
       if (cameraRef.current && controlsRef.current) {
-        // Get the standard position for this plane type
+        // Disable rotation and zooming controls, but allow panning
+        controlsRef.current.enableRotate = false;
+        controlsRef.current.enableZoom = false;  // Disable zooming in sketch mode
+        controlsRef.current.enablePan = true;    // Allow panning for positioning
+
+        if (sketch && sketch.frame) {
+          // Orient the camera to look straight at the sketch's frame.
+          positionCameraForFrame(sketch.frame, cameraRef.current, controlsRef.current);
+          console.log('Sketch created - camera oriented to frame');
+          return;
+        }
+
+        // Fallback: standard axis-aligned position for this plane type
         const standardPosition = standardCameraPositions[plane] || standardCameraPositions.xy;
-        
-        // Set camera position and orientation
         cameraRef.current.position.set(
           standardPosition.position[0],
           standardPosition.position[1],
@@ -665,23 +692,14 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           standardPosition.target[1],
           standardPosition.target[2]
         );
-        
-        // Store this position for future reference
         if (sketchId) {
           sketchCameraPositionsRef.current[sketchId] = {
             position: [...standardPosition.position],
             target: [...standardPosition.target]
           };
         }
-        
-        // Disable rotation and zooming controls, but allow panning
-        controlsRef.current.enableRotate = false;
-        controlsRef.current.enableZoom = false;  // Disable zooming in sketch mode
-        controlsRef.current.enablePan = true;    // Allow panning for positioning
         controlsRef.current.update();
-        
         console.log('Sketch created - Camera positioned normal to plane:', plane);
-        console.log('Camera rotation and zooming disabled for sketch mode');
       }
     };
     
@@ -701,10 +719,11 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         sketchStateRef.current = {
           active: true,
           plane: plane || (sketch ? sketch.plane : 'xy'),
-          offset: (sketch ? sketch.offset : offset) || 0
+          offset: (sketch ? sketch.offset : offset) || 0,
+          frame: sketch ? sketch.frame : null
         };
       } else {
-        sketchStateRef.current = { active: false, plane: null, offset: 0 };
+        sketchStateRef.current = { active: false, plane: null, offset: 0, frame: null };
       }
       sketchDrawRef.current = { firstPoint: null };
     };
@@ -1104,16 +1123,20 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           if (!['point', 'line', 'rectangle', 'circle'].includes(tool)) return false;
           if (!cameraRef.current) return false;
 
+          // Frame that rigorously defines the active sketch plane.
+          const frame = sketchState.frame;
+          if (!frame) return true;
+
           const rect = renderer.domElement.getBoundingClientRect();
           mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
           mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
           raycaster.setFromCamera(mouse, cameraRef.current);
 
-          const mathPlane = getSketchThreePlane(sketchState.plane, sketchState.offset);
+          const mathPlane = getSketchThreePlane(frame);
           const hit = new THREE.Vector3();
           if (!raycaster.ray.intersectPlane(mathPlane, hit)) return true;
 
-          const p = worldPointToSketch2D(sketchState.plane, hit);
+          const p = worldPointToSketch2D(frame, hit);
 
           try {
             if (tool === 'point') {

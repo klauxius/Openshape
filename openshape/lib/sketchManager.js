@@ -6,6 +6,8 @@ import * as jscad from '@jscad/modeling';
 const { colorize } = jscad.colors;
 
 import { modelStore, notifyModelChanged } from './mcpTools';
+import planeManager from './planeManager';
+import { basePlaneFrame, frameMatrix, to3D } from './planeFrame';
 
 class SketchManager {
   constructor() {
@@ -44,19 +46,44 @@ class SketchManager {
 
   // [Existing createSketch method with enhancements]
   createSketch(planeInfo, layer = 'default') {
-    if (!['xy', 'yz', 'xz', 'custom'].includes(planeInfo.plane)) {
-      throw new Error('Invalid plane specified');
-    }
-    if (planeInfo.plane === 'custom' && typeof planeInfo.offset !== 'number') {
-      throw new Error('Custom plane requires numeric offset');
+    // Resolve the sketch's plane frame. A sketch may be created on:
+    //   - a named datum plane:   { planeId }
+    //   - an explicit frame:     { frame }
+    //   - a base plane (+offset): { plane: 'xy'|'yz'|'xz'|'custom', offset }
+    let frame;
+    let planeLabel = planeInfo.plane || 'custom';
+    let offset = planeInfo.offset || 0;
+    let planeId = null;
+
+    if (planeInfo.frame) {
+      frame = planeInfo.frame;
+    } else if (planeInfo.planeId) {
+      const datum = planeManager.getPlane(planeInfo.planeId);
+      if (!datum) throw new Error(`Datum plane not found: ${planeInfo.planeId}`);
+      frame = datum.frame;
+      planeId = datum.id;
+      planeLabel = datum.definition.basePlane || 'custom';
+      offset = datum.definition.offset || 0;
+    } else {
+      if (!['xy', 'yz', 'xz', 'custom'].includes(planeInfo.plane)) {
+        throw new Error('Invalid plane specified');
+      }
+      if (planeInfo.plane === 'custom' && typeof planeInfo.offset !== 'number') {
+        throw new Error('Custom plane requires numeric offset');
+      }
+      frame = basePlaneFrame(planeInfo.plane, offset);
     }
 
     const sketchId = `sketch_${this.nextSketchId++}`;
     const sketch = {
       id: sketchId,
       name: `Sketch ${this.nextSketchId - 1}`,
-      plane: planeInfo.plane,
-      offset: planeInfo.offset || 0,
+      plane: planeLabel,
+      offset,
+      // Rigorous plane definition (origin + orthonormal u/v/w). All plane-aware
+      // math (transform, extrude orientation, camera, drawing) uses this.
+      frame,
+      planeId,
       entities: [],
       // Named parametric variables that entity dimensions / the extrusion can
       // reference by name. Changing one via setParameter() rebuilds everything
@@ -74,50 +101,13 @@ class SketchManager {
       constraints: {}
     };
 
-    // Create a visualization of the sketch plane
+    // Create a visualization of the sketch plane, oriented by its frame.
     const planeSize = 10;
-    let planeVisualization;
-    
-    // Use cuboid directly instead of trying to extrude a 2D rectangle
-    // This avoids the "slices must have 3 or more edges" error
-    switch (planeInfo.plane) {
-      case 'yz': {
-        // YZ plane at specified X
-        planeVisualization = jscad.primitives.cuboid({ 
-          size: [0.01, planeSize * 2, planeSize * 2] 
-        });
-        planeVisualization = jscad.transforms.translate(
-          [sketch.offset, 0, 0], 
-          planeVisualization
-        );
-        break;
-      }
-      case 'xz': {
-        // XZ plane at specified Y
-        planeVisualization = jscad.primitives.cuboid({ 
-          size: [planeSize * 2, 0.01, planeSize * 2] 
-        });
-        planeVisualization = jscad.transforms.translate(
-          [0, sketch.offset, 0], 
-          planeVisualization
-        );
-        break;
-      }
-      case 'custom':
-      case 'xy':
-      default: {
-        // XY plane at specified Z
-        planeVisualization = jscad.primitives.cuboid({ 
-          size: [planeSize * 2, planeSize * 2, 0.01] 
-        });
-        planeVisualization = jscad.transforms.translate(
-          [0, 0, sketch.offset], 
-          planeVisualization
-        );
-        break;
-      }
-    }
-    
+    let planeVisualization = jscad.primitives.cuboid({
+      size: [planeSize * 2, planeSize * 2, 0.01]
+    });
+    planeVisualization = jscad.transforms.transform(frameMatrix(frame), planeVisualization);
+
     // Add the plane visualization to the model store
     const planeModelId = modelStore.addModel(
       colorize([0.9, 0.9, 1, 0.2], planeVisualization),
@@ -131,9 +121,9 @@ class SketchManager {
     this.activeSketch = sketch;
     this.isInSketchMode = true;
     
-    // Determine camera view based on the plane
+    // Determine camera view based on the (base) plane
     let cameraView = 'front'; // default view (XY plane)
-    switch (planeInfo.plane) {
+    switch (planeLabel) {
       case 'yz':
         cameraView = 'right';
         break;
@@ -149,10 +139,10 @@ class SketchManager {
     const event = new CustomEvent('openshape:sketchCreated', {
       detail: { 
         sketchId, 
-        sketch, // Include the entire sketch object
-        plane: planeInfo.plane,
+        sketch, // Include the entire sketch object (with its frame)
+        plane: planeLabel,
         cameraView, 
-        offset: planeInfo.offset || 0
+        offset
       }
     });
     window.dispatchEvent(event);
@@ -162,7 +152,7 @@ class SketchManager {
       detail: {
         active: true,
         sketch,
-        plane: planeInfo.plane
+        plane: planeLabel
       }
     });
     window.dispatchEvent(modeEvent);
@@ -844,36 +834,11 @@ class SketchManager {
   // sketch plane, respecting the plane offset. Uses a 4x4 transform that maps
   // local axes (2D-x, 2D-y, extrude) onto the plane's world axes.
   #orientToSketchPlane(solid, sketch = this.activeSketch) {
-    const offset = sketch.offset || 0;
-
-    let U; // world direction for the profile's local X (2D-x)
-    let V; // world direction for the profile's local Y (2D-y)
-    let W; // world direction for the extrusion (plane normal)
-    let O; // world origin offset along the normal
-
-    switch (sketch.plane) {
-      case 'yz':
-        U = [0, 1, 0]; V = [0, 0, 1]; W = [1, 0, 0]; O = [offset, 0, 0];
-        break;
-      case 'xz':
-        U = [1, 0, 0]; V = [0, 0, 1]; W = [0, 1, 0]; O = [0, offset, 0];
-        break;
-      case 'xy':
-      case 'custom':
-      default:
-        U = [1, 0, 0]; V = [0, 1, 0]; W = [0, 0, 1]; O = [0, 0, offset];
-        break;
-    }
-
-    // Column-major 4x4 matrix: columns are U, V, W, and the origin translation.
-    const matrix = [
-      U[0], U[1], U[2], 0,
-      V[0], V[1], V[2], 0,
-      W[0], W[1], W[2], 0,
-      O[0], O[1], O[2], 1
-    ];
-
-    return jscad.transforms.transform(matrix, solid);
+    // extrudeLinear extrudes a profile from local z=0 along +z. The frame maps
+    // local (a, b, t) -> origin + a*u + b*v + t*w, placing and orienting the
+    // solid onto the sketch plane (base, offset, or arbitrary).
+    const frame = sketch.frame || basePlaneFrame(sketch.plane, sketch.offset || 0);
+    return jscad.transforms.transform(frameMatrix(frame), solid);
   }
 
   // [Selection management]
@@ -945,25 +910,12 @@ class SketchManager {
   transformToSketchPlane(geometry) {
     if (!this.activeSketch) throw new Error('No active sketch');
     
+    const frame = this.activeSketch.frame || basePlaneFrame(this.activeSketch.plane, this.activeSketch.offset || 0);
+
     // Special handling for point geometry
     if (geometry.type === 'point') {
-      const position = geometry.position;
-      const offset = this.activeSketch.offset || 0;
-      let position3D;
-      
-      switch (this.activeSketch.plane) {
-        case 'yz':
-          position3D = [offset, position[0], position[1]];
-          break;
-        case 'xz':
-          position3D = [position[0], offset, position[1]];
-          break;
-        case 'xy':
-        default:
-          position3D = [position[0], position[1], offset];
-          break;
-      }
-      
+      const position3D = to3D(frame, geometry.position);
+
       // Create a small sphere to represent the point
       return jscad.primitives.sphere({ 
         center: position3D, 
@@ -974,22 +926,22 @@ class SketchManager {
     
     // Special handling for sketch entities with points array (like circles, lines)
     if (geometry.points && Array.isArray(geometry.points)) {
-      // For sketch entities, we want to preserve the points array structure
-      // but make sure the metadata includes the sketch plane information
+      // For sketch entities, preserve the 2D points but also embed the 3D points
+      // mapped onto the sketch frame so the viewer can render the outline at the
+      // correct location/orientation for any plane (base, offset, or arbitrary).
       const offset = this.activeSketch.offset || 0;
-      
-      // Create a deep copy of the geometry to avoid modifying the original
+      const points3D = geometry.points.map(p => to3D(frame, p));
+
       const transformedGeometry = {
         ...geometry,
         metadata: {
           ...(geometry.metadata || {}),
           sketchOffset: offset,
-          sketchPlane: this.activeSketch.plane
+          sketchPlane: this.activeSketch.plane,
+          points3D
         }
       };
-      
-      console.log(`[SketchManager] Transformed sketch entity to plane ${this.activeSketch.plane} with offset ${offset}`);
-      
+
       return transformedGeometry;
     }
     

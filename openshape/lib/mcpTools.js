@@ -1930,6 +1930,23 @@ const exposeHeadlessApi = () => {
     callTool: (name, parameters = {}) => mcpClient.executeToolCall({ name, parameters }),
     listTools: () => mcpClient.tools.map(t => ({ name: t.name, description: t.description })),
     getToolDefinitions: () => mcpClient.getToolDefinitions(),
+    // Inspection helpers (useful for agents/tests to confirm results headlessly)
+    listModels: () => Object.values(modelStore.models).map(m => ({ id: m.id, name: m.name })),
+    getModel: (id) => modelStore.getModel(id),
+    measureModel: (id) => {
+      const model = modelStore.getModel(id);
+      if (!model || !model.geometry) return null;
+      try {
+        const [min, max] = jscad.measurements.measureBoundingBox(model.geometry);
+        return {
+          min,
+          max,
+          size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
+        };
+      } catch (error) {
+        return { error: error.message };
+      }
+    },
     client: mcpClient
   };
 };

@@ -44,6 +44,13 @@ Next.js 15 (React 18) + Three.js + JSCAD. All app code lives in the `openshape/`
   closed loop of `cadAddLineToSketch` segments. `cadExtrudeSketch` reads `activeSketch.entities`;
   the `create_rectangle`/`create_circle`/`create_polygon` tools write straight to the model
   store and are NOT part of a sketch (so they are not extruded by `cadExtrudeSketch`).
+- Sketches are parametric. Define named parameters on the sketch
+  (`cadCreateSketch({ plane:'xy', parameters:{ w:12, h:8, d:6 } })`), then bind a dimension to a
+  parameter by passing its NAME as a string, e.g. `cadAddRectangleToSketch({ width:'w', height:'h' })`
+  and `cadExtrudeSketch({ height:'d' })`. `cadSetSketchParameter({ name:'w', value:24 })` updates the
+  parameter and rebuilds every bound entity dimension and the linked extruded solid in place;
+  `cadGetSketchParameters()` reads them. Numeric literals still work (no binding). Use
+  `window.openshapeCAD.measureModel(id)` to confirm resulting dimensions headlessly.
 - The built-in AI assistant only uses simulated (offline) tool-calling when `CLAUDE_API_KEY` /
   `NEXT_PUBLIC_CLAUDE_API_KEY` is set or `NEXT_PUBLIC_USE_SIMULATED_RESPONSES=true`; otherwise it
   replies that the API key is not configured. The `window.openshapeCAD` path needs neither.

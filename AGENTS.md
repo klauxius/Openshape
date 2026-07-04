@@ -32,6 +32,22 @@ Next.js 15 (React 18) + Three.js + JSCAD. All app code lives in the `openshape/`
   press `` Ctrl+` ``) and run e.g. `result = jscad.primitives.cuboid({ size: [10, 10, 10] });`
   to create and render a solid. It appears in the viewport and in the sidebar under "Parts".
 
+### Driving the app headlessly (MCP tools, no GUI)
+- Once `/cad-interface` has mounted, `initializeTools()` (called on mount) exposes
+  `window.openshapeCAD` with `callTool(name, params)`, `listTools()`, and `getToolDefinitions()`.
+  This is the programmatic/agent entry point - the same MCP tools the in-app AI assistant uses.
+- Full sketch -> extrude example (browser console, no clicking required):
+  `await window.openshapeCAD.callTool('cadCreateSketch', { plane: 'xy' })` then
+  `await window.openshapeCAD.callTool('cadAddRectangleToSketch', { width: 12, height: 8 })`
+  then `await window.openshapeCAD.callTool('cadExtrudeSketch', { height: 6 })`.
+- Extrudable sketch profiles come from `cadAddRectangleToSketch`, `cadAddCircleToSketch`, or a
+  closed loop of `cadAddLineToSketch` segments. `cadExtrudeSketch` reads `activeSketch.entities`;
+  the `create_rectangle`/`create_circle`/`create_polygon` tools write straight to the model
+  store and are NOT part of a sketch (so they are not extruded by `cadExtrudeSketch`).
+- The built-in AI assistant only uses simulated (offline) tool-calling when `CLAUDE_API_KEY` /
+  `NEXT_PUBLIC_CLAUDE_API_KEY` is set or `NEXT_PUBLIC_USE_SIMULATED_RESPONSES=true`; otherwise it
+  replies that the API key is not configured. The `window.openshapeCAD` path needs neither.
+
 ### Known caveats (pre-existing, do NOT try to "fix" as part of setup)
 - `npm run build` (production build) currently FAILS: `components/JSCADViewer.js` (imported by
   the legacy `pages/index.js` and `pages/simple-fiber-test.js`) does `import ... from

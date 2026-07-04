@@ -1400,7 +1400,11 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
     };
     
     importJscad();
-  }, [modelType, measurementMode, unitSystem, showPlanes, inSketchMode, activeSketchPlane]);
+    // NOTE: inSketchMode/activeSketchPlane are intentionally NOT dependencies.
+    // Rebuilding the scene when toggling sketch mode would drop dynamically
+    // added meshes (e.g. a freshly extruded solid). Sketch camera locking and
+    // the 'r' reset shortcut are handled by dedicated effects instead.
+  }, [modelType, measurementMode, unitSystem, showPlanes]);
 
   const handleModelChange = (event) => {
     setModelType(event.target.value);

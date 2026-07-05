@@ -61,6 +61,13 @@ Next.js 15 (React 18) + Three.js + JSCAD. All app code lives in the `openshape/`
   nothing is `fixed`. `distance` with a parameter name is parametric — `cadSetSketchParameter`
   re-solves and rebuilds the extrusion. `cadListConstraints` lists them. Solver has a Node unit
   test: `node lib/constraintSolver.test.mjs` (from `openshape/`).
+- Relation builder UI: in Sketch Mode the toolbar has a "Relations" row. Select elements with
+  Ctrl/Cmd+click in the viewport (Select tool active) — points/lines highlight green and the
+  counter shows "{n}L / {n}P selected"; then click a relation button (Coincident, Horizontal,
+  Vertical, Parallel, Perpendicular, Equal, Fix, Distance). The GUI Line tool creates
+  point-connected segments (reusing a nearby point within ~0.75 units) so drawn lines are
+  selectable/constrainable and shared endpoints form closed loops. Selection events:
+  `openshape:sketchSelectionChanged` / `openshape:clearSketchSelection`.
 - Datum planes: define a reference plane rigorously with `cadCreatePlane` — either an offset
   plane (`{ basePlane:'xy'|'yz'|'xz', offset }`) or a general plane (`{ origin:[x,y,z],
   normal:[x,y,z] }`) — then sketch on it via `cadCreateSketch({ planeId })`. Internally every

@@ -1201,6 +1201,14 @@ class SketchManager {
   getActiveSketch() {
     return this.activeSketch;
   }
+
+  // Look up an active-sketch entity by the model id it renders as. Used by the
+  // viewer to map a clicked 3D object back to a selectable sketch entity.
+  getActiveEntityByModelId(modelId) {
+    if (!this.activeSketch) return null;
+    const entity = this.activeSketch.entities.find(e => e.modelId === modelId);
+    return entity ? { id: entity.id, type: entity.type } : null;
+  }
   
   // Get all available connection points
   getConnectionPoints() {

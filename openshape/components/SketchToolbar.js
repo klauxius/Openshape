@@ -22,6 +22,8 @@ import sketchManager from '../lib/sketchManager';
 const SketchToolbar = ({ onExit, onExtrude }) => {
   const [activeTool, setActiveTool] = useState('select');
   const [activeSketch, setActiveSketch] = useState(null);
+  const [selection, setSelection] = useState([]);
+  const [distanceValue, setDistanceValue] = useState(10);
   
   useEffect(() => {
     // Get active sketch on mount
@@ -49,6 +51,13 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('openshape:sketchToolChanged', { detail: { tool: activeTool } }));
   }, [activeTool]);
+
+  // Track which sketch elements are selected (via Ctrl+click in the viewer).
+  useEffect(() => {
+    const handler = (event) => setSelection((event.detail && event.detail.selection) || []);
+    window.addEventListener('openshape:sketchSelectionChanged', handler);
+    return () => window.removeEventListener('openshape:sketchSelectionChanged', handler);
+  }, []);
   
   if (!activeSketch) return null;
   
@@ -69,6 +78,75 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
       }
     }
   };
+
+  // Selected points / lines drive which relations are available.
+  const selPoints = selection.filter(s => s.type === 'point');
+  const selLines = selection.filter(s => s.type === 'line');
+
+  const relationEnabled = {
+    coincident: selPoints.length >= 2,
+    horizontal: selLines.length >= 1 || selPoints.length >= 2,
+    vertical: selLines.length >= 1 || selPoints.length >= 2,
+    parallel: selLines.length >= 2,
+    perpendicular: selLines.length >= 2,
+    equal: selLines.length >= 2,
+    distance: selLines.length >= 1,
+    fixed: selPoints.length >= 1
+  };
+
+  const applyRelation = (type) => {
+    const pts = selPoints.map(s => s.entityId);
+    const lines = selLines.map(s => s.entityId);
+    let entities = [];
+    let value;
+    switch (type) {
+      case 'coincident':
+        entities = pts.slice(0, 2);
+        break;
+      case 'horizontal':
+      case 'vertical':
+        entities = lines.length >= 1 ? [lines[0]] : pts.slice(0, 2);
+        break;
+      case 'parallel':
+      case 'perpendicular':
+      case 'equal':
+        entities = lines.slice(0, 2);
+        break;
+      case 'distance':
+        entities = [lines[0]];
+        value = Number(distanceValue);
+        break;
+      case 'fixed':
+        entities = [pts[0]];
+        break;
+      default:
+        break;
+    }
+    try {
+      sketchManager.addConstraint(type, entities, value);
+    } catch (err) {
+      console.error('Failed to add constraint:', err);
+      alert(`Could not add ${type} relation: ${err.message}`);
+    }
+    // Clear the selection in the viewer after applying.
+    window.dispatchEvent(new CustomEvent('openshape:clearSketchSelection'));
+  };
+
+  const relationButton = (type, label) => (
+    <button
+      key={type}
+      disabled={!relationEnabled[type]}
+      onClick={() => applyRelation(type)}
+      title={label}
+      className={`px-2 py-0.5 text-xs rounded border ${
+        relationEnabled[type]
+          ? 'border-blue-300 text-blue-700 hover:bg-blue-50'
+          : 'border-gray-200 text-gray-300 cursor-not-allowed'
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   // Short instruction shown for the active tool
   const toolHints = {
@@ -218,6 +296,29 @@ const SketchToolbar = ({ onExit, onExtrude }) => {
         >
           <X size={20} className="text-red-600" />
         </button>
+      </div>
+
+      {/* Relation builder: Ctrl+click elements in the viewport, then apply a relation */}
+      <div className="px-2 pb-2 pt-1 flex items-center flex-wrap gap-1 border-t border-gray-200">
+        <span className="text-xs font-medium text-gray-600 mr-1">Relations</span>
+        <span className="text-[10px] text-gray-400 mr-2">(Ctrl+click elements)</span>
+        <span className="text-xs text-blue-600 mr-2">{selLines.length}L / {selPoints.length}P selected</span>
+        {relationButton('coincident', 'Coincident')}
+        {relationButton('horizontal', 'Horizontal')}
+        {relationButton('vertical', 'Vertical')}
+        {relationButton('parallel', 'Parallel')}
+        {relationButton('perpendicular', 'Perpendicular')}
+        {relationButton('equal', 'Equal')}
+        {relationButton('fixed', 'Fix')}
+        <span className="mx-1 h-5 border-l border-gray-300" />
+        {relationButton('distance', 'Distance')}
+        <input
+          type="number"
+          value={distanceValue}
+          onChange={(e) => setDistanceValue(e.target.value)}
+          className="w-16 px-1 py-0.5 border border-gray-300 rounded text-xs"
+          title="Distance value"
+        />
       </div>
     </div>
   );

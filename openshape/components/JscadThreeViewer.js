@@ -404,6 +404,8 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
   const sketchStateRef = useRef({ active: false, plane: null, offset: 0, frame: null });
   const sketchToolRef = useRef('select');
   const sketchDrawRef = useRef({ firstPoint: null });
+  // Ctrl+click selection of sketch elements for the relation builder.
+  const sketchSelectionRef = useRef([]);
 
   // Define standard camera positions for each plane type
   const standardCameraPositions = {
@@ -538,6 +540,10 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
           
           // Enable frustum culling for better performance
           object.frustumCulled = PERFORMANCE_CONFIG.frustumCulling;
+
+          // Tag with the model id so Ctrl+click can map a clicked object back to
+          // its sketch entity for the relation builder.
+          object.userData.modelId = modelData.id;
           
           // Add to scene
           sceneRef.current.add(object);
@@ -730,6 +736,10 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         };
       } else {
         sketchStateRef.current = { active: false, plane: null, offset: 0, frame: null };
+        // Clear any element selection when leaving sketch mode.
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('openshape:clearSketchSelection'));
+        }
       }
       sketchDrawRef.current = { firstPoint: null };
     };
@@ -1119,6 +1129,77 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         
         renderer.domElement.addEventListener('mousemove', handleMouseMove);
         
+        // Highlight materials for selected sketch elements (relation builder).
+        const selectionLineMaterial = new THREE.LineBasicMaterial({ color: 0x22c55e, linewidth: 3 });
+        const selectionMeshMaterial = new THREE.MeshStandardMaterial({
+          color: 0x22c55e, emissive: 0x0f5132, metalness: 0.2, roughness: 0.5, flatShading: true
+        });
+
+        const emitSketchSelection = () => {
+          const detail = {
+            selection: sketchSelectionRef.current.map(s => ({ entityId: s.entityId, type: s.type }))
+          };
+          window.dispatchEvent(new CustomEvent('openshape:sketchSelectionChanged', { detail }));
+        };
+
+        const clearSketchSelection = () => {
+          for (const s of sketchSelectionRef.current) {
+            if (s.object && s.originalMaterial) s.object.material = s.originalMaterial;
+          }
+          sketchSelectionRef.current = [];
+          emitSketchSelection();
+        };
+
+        const toggleSketchSelection = (object, modelId, entity) => {
+          const sel = sketchSelectionRef.current;
+          const idx = sel.findIndex(s => s.modelId === modelId);
+          if (idx >= 0) {
+            // Deselect: restore original material.
+            if (sel[idx].object && sel[idx].originalMaterial) {
+              sel[idx].object.material = sel[idx].originalMaterial;
+            }
+            sel.splice(idx, 1);
+          } else {
+            const isLine = object.type === 'LineLoop' || object.type === 'Line';
+            const originalMaterial = object.material;
+            object.material = isLine ? selectionLineMaterial : selectionMeshMaterial;
+            sel.push({ modelId, entityId: entity.id, type: entity.type, object, originalMaterial });
+          }
+          emitSketchSelection();
+        };
+
+        // Ctrl/Cmd + click selects a sketch point or line for the relation
+        // builder (only in sketch mode with the Select tool active).
+        const onSketchSelectClick = (event) => {
+          if (!sketchStateRef.current.active) return false;
+          if (sketchToolRef.current !== 'select') return false;
+          if (!(event.ctrlKey || event.metaKey)) return false;
+          if (!cameraRef.current) return false;
+
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, cameraRef.current);
+          raycaster.params.Line.threshold = 0.6;
+
+          const objects = Object.values(meshesRef.current).filter(Boolean);
+          const hits = raycaster.intersectObjects(objects, false);
+          for (const hit of hits) {
+            const modelId = hit.object.userData && hit.object.userData.modelId;
+            if (!modelId) continue;
+            const entity = sketchManager.getActiveEntityByModelId(modelId);
+            if (entity && (entity.type === 'point' || entity.type === 'line')) {
+              toggleSketchSelection(hit.object, modelId, entity);
+              return true;
+            }
+          }
+          return true; // consume ctrl+clicks in sketch mode even if nothing hit
+        };
+
+        // Allow other handlers (SketchToolbar) to clear the selection.
+        const handleClearSelection = () => clearSketchSelection();
+        window.addEventListener('openshape:clearSketchSelection', handleClearSelection);
+
         // Handle sketch drawing clicks: raycast the click onto the active sketch
         // plane and add the corresponding 2D entity. Multi-click tools (line,
         // rectangle, circle) accumulate a first point before completing.
@@ -1190,6 +1271,9 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
 
         // Handle mouse clicks for measurements
         const onMouseClick = (event) => {
+          // Ctrl/Cmd + click selects sketch elements for the relation builder.
+          if (onSketchSelectClick(event)) return;
+
           // Sketch drawing takes priority when a sketch tool is active.
           if (onSketchClick(event)) return;
 
@@ -1413,6 +1497,7 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
         return () => {
           window.removeEventListener('resize', handleResize);
           window.removeEventListener('keydown', handleKeyDown);
+          window.removeEventListener('openshape:clearSketchSelection', handleClearSelection);
           renderer.domElement.removeEventListener('mousemove', handleMouseMove);
           renderer.domElement.removeEventListener('click', onMouseClick);
           

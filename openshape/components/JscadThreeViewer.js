@@ -50,6 +50,12 @@ const positionCameraForFrame = (frame, camera, controls, distance = 15) => {
   }
 };
 
+// Consistent shape colors: every solid uses the same material color and every
+// sketch outline the same line color, so shapes don't change color when they
+// are created, edited, or re-rendered.
+const SOLID_COLOR = '#5b8fb9';       // steel blue for 3D solids
+const SKETCH_LINE_COLOR = '#f59e0b'; // amber for sketch outlines
+
 // Performance configuration object - easily tune performance settings
 const PERFORMANCE_CONFIG = {
   // Renderer settings
@@ -488,11 +494,11 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             modelGeometryCache[geometryKey] = threeGeometry;
           }
           
-          // Create material based on the type of geometry - reuse from cache when possible
+          // Use a consistent color per geometry type so shapes don't change
+          // color when they are created, edited, or re-rendered. Solids share
+          // one material; sketch outlines share another.
           let material;
-          const modelIndex = Object.keys(mcpModels).length;
-          const hue = (modelIndex * 137.5) % 360; // Golden angle to distribute colors
-          const materialKey = isSketchEntity || isJscad2D ? `line-${hue}` : `mesh-${hue}`;
+          const materialKey = isSketchEntity || isJscad2D ? 'sketch-line' : 'solid-mesh';
           
           // Check if we have a cached material
           if (materialCache[materialKey]) {
@@ -501,13 +507,13 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             if (isSketchEntity || isJscad2D) {
               // For sketch entities or JSCAD 2D shapes (like circles), use a line material
               material = new THREE.LineBasicMaterial({
-                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                color: new THREE.Color(SKETCH_LINE_COLOR),
                 linewidth: 2, // Note: linewidth > 1 only works in WebGL 2
               });
             } else {
               // For 3D models, use a standard material with optimized settings
               material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(`hsl(${hue}, 70%, 60%)`),
+                color: new THREE.Color(SOLID_COLOR),
                 metalness: 0.2,
                 roughness: 0.5,
                 flatShading: true, // Faster rendering

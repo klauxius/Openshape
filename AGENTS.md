@@ -51,6 +51,16 @@ Next.js 15 (React 18) + Three.js + JSCAD. All app code lives in the `openshape/`
   parameter and rebuilds every bound entity dimension and the linked extruded solid in place;
   `cadGetSketchParameters()` reads them. Numeric literals still work (no binding). Use
   `window.openshapeCAD.measureModel(id)` to confirm resulting dimensions headlessly.
+- Sketch constraints (geometric relations): `cadAddConstraint({ type, entities, value })` adds a
+  relation and immediately re-solves the sketch (iterative solver in `lib/constraintSolver.mjs`).
+  Types: `coincident` (two point ids), `horizontal`/`vertical` (a line id or two point ids),
+  `parallel`/`perpendicular`/`equal` (two line ids), `distance`/`length` (a line id + numeric
+  value OR a parameter name), `fixed` (a point id). Constraints operate on POINTS and
+  point-connected LINES, so build geometry with `cadAddPoint` + `cadConnectPoints` (not
+  `cadAddRectangleToSketch`) when you want it constrained. The first point is auto-anchored if
+  nothing is `fixed`. `distance` with a parameter name is parametric — `cadSetSketchParameter`
+  re-solves and rebuilds the extrusion. `cadListConstraints` lists them. Solver has a Node unit
+  test: `node lib/constraintSolver.test.mjs` (from `openshape/`).
 - Datum planes: define a reference plane rigorously with `cadCreatePlane` — either an offset
   plane (`{ basePlane:'xy'|'yz'|'xz', offset }`) or a general plane (`{ origin:[x,y,z],
   normal:[x,y,z] }`) — then sketch on it via `cadCreateSketch({ planeId })`. Internally every

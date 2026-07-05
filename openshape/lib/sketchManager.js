@@ -101,8 +101,7 @@ class SketchManager {
       createdAt: new Date(),
       updatedAt: new Date(),
       isActive: true,
-      layer: layer,
-      constraints: {}
+      layer: layer
     };
 
     // Create a visualization of the sketch plane, oriented by its frame.

@@ -8,6 +8,7 @@ const { colorize } = jscad.colors;
 import { modelStore, notifyModelChanged } from './mcpTools';
 import planeManager from './planeManager';
 import { basePlaneFrame, frameMatrix, to3D } from './planeFrame';
+import { solveConstraints } from './constraintSolver.mjs';
 
 class SketchManager {
   constructor() {
@@ -94,6 +95,9 @@ class SketchManager {
       // Link to the solid produced by extruding this sketch (kept so parameter
       // changes can rebuild it in place).
       extrusion: null,
+      // Geometric relations (coincident, horizontal, parallel, ...) solved by
+      // the constraint solver over the sketch's points.
+      constraints: [],
       createdAt: new Date(),
       updatedAt: new Date(),
       isActive: true,
@@ -661,8 +665,11 @@ class SketchManager {
       }
     }
 
-    // Rebuild the linked extrusion so the solid stays in sync.
-    if (sketch.extrusion) {
+    // Re-solve constraints (e.g. a distance bound to this parameter) and keep
+    // the linked extrusion in sync. Solving rebuilds the extrusion itself.
+    if (sketch.constraints && sketch.constraints.length > 0) {
+      this.#solveSketchConstraints(sketch);
+    } else if (sketch.extrusion) {
       this.#rebuildExtrusion(sketch);
     }
 
@@ -695,6 +702,129 @@ class SketchManager {
 
     modelStore.updateModel(ext.modelId, { geometry: oriented });
     notifyModelChanged({ id: ext.modelId, geometry: oriented, isVisible: true });
+  }
+
+  // Add a geometric relation between sketch entities, then solve the sketch.
+  // Supported: coincident, horizontal, vertical, parallel, perpendicular,
+  // equal, distance (a.k.a length), and fixed. Line-based constraints accept a
+  // line entity id (created via connectPoints) or two point ids; coincident and
+  // fixed take point ids. `value` (for distance) may be a number or the name of
+  // a sketch parameter.
+  addConstraint(type, entities = [], value) {
+    const sketch = this.activeSketch;
+    if (!sketch) throw new Error('No active sketch');
+
+    const supported = ['coincident', 'horizontal', 'vertical', 'parallel', 'perpendicular', 'equal', 'distance', 'length', 'fixed'];
+    if (!supported.includes(type)) {
+      throw new Error(`Unsupported constraint type: ${type}`);
+    }
+
+    const constraint = {
+      id: `constraint_${sketch.id}_${sketch.constraints.length + 1}`,
+      type,
+      entities: Array.isArray(entities) ? [...entities] : [entities],
+      value
+    };
+
+    if (type === 'fixed') {
+      const pt = sketch.entities.find(e => e.id === constraint.entities[0] && e.type === 'point');
+      if (!pt) throw new Error('fixed constraint requires a point entity id');
+      pt.params.fixed = true;
+    }
+
+    sketch.constraints.push(constraint);
+
+    this.#solveSketchConstraints(sketch);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:constraintAdded', {
+        detail: { sketchId: sketch.id, constraint }
+      }));
+    }
+
+    return constraint;
+  }
+
+  getConstraints() {
+    return this.activeSketch ? this.activeSketch.constraints.map(c => ({ ...c })) : [];
+  }
+
+  // Map a stored constraint into the solver's schema, resolving line entities to
+  // their endpoint point ids and parametric distance values to numbers.
+  #resolveConstraintForSolver(sketch, c) {
+    const lineEndpoints = (ref) => {
+      const ent = sketch.entities.find(e => e.id === ref);
+      if (ent && ent.type === 'line' && ent.params.startPointId && ent.params.endPointId) {
+        return [ent.params.startPointId, ent.params.endPointId];
+      }
+      return null;
+    };
+
+    switch (c.type) {
+      case 'coincident':
+        return { type: 'coincident', a: c.entities[0], b: c.entities[1] };
+      case 'horizontal':
+      case 'vertical':
+      case 'distance':
+      case 'length': {
+        let line = lineEndpoints(c.entities[0]);
+        if (!line && c.entities.length >= 2) line = [c.entities[0], c.entities[1]];
+        if (!line) return null;
+        const out = { type: c.type === 'length' ? 'distance' : c.type, line };
+        if (c.type === 'distance' || c.type === 'length') out.value = this.#resolveValue(c.value);
+        return out;
+      }
+      case 'parallel':
+      case 'perpendicular':
+      case 'equal': {
+        const l1 = lineEndpoints(c.entities[0]);
+        const l2 = lineEndpoints(c.entities[1]);
+        if (!l1 || !l2) return null;
+        return { type: c.type, line1: l1, line2: l2 };
+      }
+      default:
+        return null;
+    }
+  }
+
+  // Solve all constraints on a sketch and write updated point positions back
+  // (regenerating connected lines and any linked extrusion).
+  #solveSketchConstraints(sketch = this.activeSketch) {
+    if (!sketch || !sketch.constraints || sketch.constraints.length === 0) return;
+
+    const pointEntities = sketch.entities.filter(e => e.type === 'point');
+    if (pointEntities.length === 0) return;
+
+    // Anchor the first point when nothing is explicitly fixed so the solve is
+    // well-posed and the sketch doesn't drift.
+    const anyFixed = pointEntities.some(e => e.params.fixed);
+    const inputPoints = pointEntities.map((e, idx) => ({
+      id: e.id,
+      x: e.params.position[0],
+      y: e.params.position[1],
+      fixed: e.params.fixed ? true : (!anyFixed && idx === 0)
+    }));
+
+    const solverConstraints = sketch.constraints
+      .map(c => this.#resolveConstraintForSolver(sketch, c))
+      .filter(Boolean);
+
+    if (solverConstraints.length === 0) return;
+
+    const solved = solveConstraints(inputPoints, solverConstraints);
+
+    for (const e of pointEntities) {
+      const p = solved.get(e.id);
+      if (!p) continue;
+      const cur = e.params.position;
+      if (Math.abs(cur[0] - p.x) > 1e-9 || Math.abs(cur[1] - p.y) > 1e-9) {
+        this.updateEntity(e.id, { position: [p.x, p.y] });
+      }
+    }
+
+    if (sketch.extrusion) {
+      this.#rebuildExtrusion(sketch);
+    }
   }
 
   // [Layer management]

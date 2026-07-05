@@ -962,6 +962,28 @@ export const CADOperations = {
       return { success: false, error: error.message };
     }
   },
+
+  // Geometric constraints / relations
+  addConstraint: (params = {}) => {
+    try {
+      const constraint = sketchManager.addConstraint(params.type, params.entities || [], params.value);
+      return {
+        success: true,
+        constraintId: constraint.id,
+        message: `Added ${params.type} constraint`
+      };
+    } catch (error) {
+      console.error('Failed to add constraint:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  getConstraints: () => {
+    try {
+      return { success: true, constraints: sketchManager.getConstraints() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
   
   // Point management
   getConnectionPoints: () => sketchManager.getConnectionPoints(),

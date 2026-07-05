@@ -1950,6 +1950,61 @@ const registerCADOperationsTools = () => {
     }
   });
 
+  // Register Add Constraint (geometric relation)
+  mcpClient.registerTool({
+    name: 'cadAddConstraint',
+    description: 'Adds a geometric relation to the active sketch and solves it. Types: coincident (two point ids), horizontal/vertical (a line id or two point ids), parallel/perpendicular/equal (two line ids), distance (a line id + numeric value or parameter name), fixed (a point id). Lines must be point-connected (created via cadConnectPoints).',
+    patterns: [
+      'make {a} and {b} coincident',
+      'make {line} horizontal',
+      'make {line1} perpendicular to {line2}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Constraint type',
+          enum: ['coincident', 'horizontal', 'vertical', 'parallel', 'perpendicular', 'equal', 'distance', 'length', 'fixed']
+        },
+        entities: {
+          type: 'array',
+          description: 'Entity ids the constraint applies to (point ids or line ids depending on type)',
+          items: { type: 'string' }
+        },
+        value: {
+          type: ['number', 'string'],
+          description: 'For distance/length: the target length as a number, or the name of a sketch parameter'
+        }
+      },
+      required: ['type', 'entities']
+    },
+    execute: async (params) => {
+      const result = CADOperations.addConstraint(params);
+      return {
+        success: result.success,
+        constraintId: result.constraintId,
+        message: result.success ? result.message : result.error
+      };
+    }
+  });
+
+  // Register List Constraints
+  mcpClient.registerTool({
+    name: 'cadListConstraints',
+    description: 'Lists the geometric constraints on the active sketch',
+    patterns: ['list constraints', 'list relations'],
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      const result = CADOperations.getConstraints();
+      return {
+        success: result.success,
+        constraints: result.constraints,
+        message: result.success ? `${result.constraints.length} constraint(s)` : result.error
+      };
+    }
+  });
+
   // Register Get Sketch Parameters
   mcpClient.registerTool({
     name: 'cadGetSketchParameters',

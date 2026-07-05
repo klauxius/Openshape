@@ -1229,14 +1229,21 @@ const JscadThreeViewer = forwardRef(({ onModelChange, ...props }, ref) => {
             if (tool === 'point') {
               sketchManager.addEntity('point', { position: p });
             } else if (tool === 'line') {
-              if (!sketchDrawRef.current.firstPoint) {
-                sketchDrawRef.current.firstPoint = p;
-              } else {
-                sketchManager.addEntity('line', {
-                  startPoint: sketchDrawRef.current.firstPoint,
-                  endPoint: p
-                });
-                sketchDrawRef.current.firstPoint = null;
+              // Create point-connected line segments (so they can be selected and
+              // constrained). Clicking near an existing point reuses it, which
+              // lets segments share endpoints and form closed loops.
+              const ensurePoint = (pt) => {
+                const near = sketchManager.findClosestConnectionPoint(pt, 0.75);
+                if (near) return near.id;
+                return sketchManager.addEntity('point', { position: pt }).id;
+              };
+              const ptId = ensurePoint(p);
+              if (!sketchDrawRef.current.firstPointId) {
+                sketchDrawRef.current.firstPointId = ptId;
+              } else if (sketchDrawRef.current.firstPointId !== ptId) {
+                sketchManager.createConnection(sketchDrawRef.current.firstPointId, ptId);
+                // Continue the polyline from this point.
+                sketchDrawRef.current.firstPointId = ptId;
               }
             } else if (tool === 'rectangle') {
               if (!sketchDrawRef.current.firstPoint) {

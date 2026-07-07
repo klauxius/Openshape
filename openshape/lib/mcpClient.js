@@ -9,7 +9,6 @@ class MCPClient {
     this.tools = [];
     this.conversationId = null;
     this.apiEndpoint = '/api/claude';
-    this.apiKey = process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
     this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-opus-20240229';
   }
 
@@ -56,22 +55,16 @@ class MCPClient {
    * @returns {Promise<Object>} - Claude's response
    */
   async sendMessage(message, conversation = []) {
-    if (!this.apiKey && !process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES) {
-      console.warn('Claude API key not set and simulated responses not enabled');
-      return {
-        role: 'assistant',
-        content: 'Sorry, I cannot process your request because the API key is not configured.',
-        id: Date.now().toString()
-      };
+    // Explicit dev opt-in: skip the real API entirely and use the local pattern matcher.
+    // Whether a Claude API key is configured is a server-side concern (see pages/api/claude.js);
+    // the client must not gate on it directly, since only NEXT_PUBLIC_-prefixed vars are visible
+    // here and the real key should never be exposed to the browser via that prefix.
+    if (process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
+      console.log('Using simulated responses for development');
+      return this.generateSimulatedResponse(message);
     }
 
     try {
-      // Use simulated responses if enabled or no API key
-      if (!this.apiKey || process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
-        console.log('Using simulated responses for development');
-        return this.generateSimulatedResponse(message);
-      }
-      
       // Format the conversation history for Claude API
       const formattedMessages = conversation.map(msg => ({
         role: msg.role,
@@ -109,6 +102,14 @@ class MCPClient {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Claude API error:', errorText);
+
+        // Server has no API key configured - fall back to the local pattern matcher
+        // instead of surfacing a hard error to the user.
+        if (response.status === 500 && errorText.includes('API key not configured')) {
+          console.warn('Claude API key not configured on server; using simulated responses');
+          return this.generateSimulatedResponse(message);
+        }
+
         throw new Error(`API error: ${response.status} - ${errorText}`);
       }
       

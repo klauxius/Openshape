@@ -9,7 +9,10 @@ export default async function handler(req, res) {
     const body = req.body;
     
     // Get the API key from environment variables (server-side only)
-    const apiKey = process.env.CLAUDE_API_KEY || process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
+    const apiKey = process.env.CLAUDE_API_KEY
+      || process.env.ANTHROPIC_API_KEY
+      || process.env.NEXT_PUBLIC_CLAUDE_API_KEY
+      || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
     const apiEndpoint = process.env.CLAUDE_API_ENDPOINT || process.env.NEXT_PUBLIC_CLAUDE_API_ENDPOINT || 'https://api.anthropic.com/v1/messages';
     const model = process.env.CLAUDE_MODEL || process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-7-sonnet-20250219';
     
@@ -38,9 +41,11 @@ export default async function handler(req, res) {
     
     // Get the response
     const data = await response.json();
-    
-    // Return the response from Claude
-    return res.status(200).json(data);
+
+    // Forward Anthropic's actual status so client-side error handling
+    // (e.g. detecting an unconfigured/invalid key) sees real failures
+    // instead of a false 200 wrapping an error payload.
+    return res.status(response.status).json(data);
   } catch (error) {
     console.error('Claude API error:', error);
     return res.status(500).json({ error: 'Failed to fetch from Claude API', details: error.message });

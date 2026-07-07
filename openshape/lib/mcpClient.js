@@ -38,21 +38,28 @@ class MCPClient {
   }
 
   /**
-   * Returns all registered tools in the format expected by Claude
+   * Returns all registered tools in the format expected by Claude.
+   * Anthropic's tool schema requires the JSON schema under `input_schema`
+   * (not `parameters`) - the wire format differs from our internal
+   * registry field name.
    */
   getToolDefinitions() {
     return this.tools.map(tool => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters
+      input_schema: tool.parameters
     }));
   }
 
   /**
-   * Sends a message to Claude and handles tool calling
+   * Sends a message to Claude, running tools and feeding their results back
+   * until Claude stops requesting them (or a safety cap is hit). This lets
+   * Claude chain multiple tool calls in sequence, each informed by the
+   * previous one's result, rather than only ever executing the tool(s)
+   * from a single response.
    * @param {string} message - The user's message
    * @param {Array} conversation - The conversation history
-   * @returns {Promise<Object>} - Claude's response
+   * @returns {Promise<Object>} - Final assistant response plus every tool call made along the way
    */
   async sendMessage(message, conversation = []) {
     // Explicit dev opt-in: skip the real API entirely and use the local pattern matcher.
@@ -64,89 +71,114 @@ class MCPClient {
       return this.generateSimulatedResponse(message);
     }
 
-    try {
-      // Format the conversation history for Claude API
-      const formattedMessages = conversation.map(msg => ({
+    // Anthropic message history: the running list of turns, including raw
+    // tool_use/tool_result content blocks (not the flattened {role, content}
+    // string shape the chat UI stores its own history in). The UI also keeps
+    // 'system' role entries for tool-call/result bubbles - Claude's API only
+    // accepts user/assistant roles in `messages`, so those must be dropped.
+    const messages = conversation
+      .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+      .map(msg => ({
         role: msg.role,
         content: msg.content
       }));
-      
-      // Add the current message
-      formattedMessages.push({
-        role: 'user',
-        content: message
-      });
-      
-      // Prepare the Claude API request
-      const claudeRequest = {
-        model: this.modelName,
-        messages: formattedMessages,
-        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.",
-        max_tokens: 4000,
-        temperature: 0.7,
-        tools: this.getToolDefinitions()
-      };
-      
-      console.log('Sending request via proxy API route:', this.apiEndpoint);
-      
-      // Make the API call via our proxy route
-      const response = await fetch(this.apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(claudeRequest)
-      });
-      
-      // Handle API errors
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Claude API error:', errorText);
+    messages.push({ role: 'user', content: message });
 
-        // Server has no API key configured - fall back to the local pattern matcher
-        // instead of surfacing a hard error to the user.
-        if (response.status === 500 && errorText.includes('API key not configured')) {
-          console.warn('Claude API key not configured on server; using simulated responses');
-          return this.generateSimulatedResponse(message);
+    const allToolCalls = [];
+    const MAX_TOOL_ITERATIONS = 8;
+
+    try {
+      for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+        const claudeRequest = {
+          model: this.modelName,
+          messages,
+          system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals. When a task needs multiple steps (e.g. creating a sketch, then drawing geometry in it, then extruding), call the tools one at a time and use each result to decide the next step.",
+          max_tokens: 4000,
+          temperature: 0.7,
+          tools: this.getToolDefinitions()
+        };
+
+        console.log('Sending request via proxy API route:', this.apiEndpoint);
+
+        const response = await fetch(this.apiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(claudeRequest)
+        });
+
+        // Handle API errors
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Claude API error:', errorText);
+
+          // Server has no API key configured - fall back to the local pattern matcher
+          // instead of surfacing a hard error to the user.
+          if (response.status === 500 && errorText.includes('API key not configured')) {
+            console.warn('Claude API key not configured on server; using simulated responses');
+            return this.generateSimulatedResponse(message);
+          }
+
+          throw new Error(`API error: ${response.status} - ${errorText}`);
         }
 
-        throw new Error(`API error: ${response.status} - ${errorText}`);
-      }
-      
-      // Parse the response
-      const claudeResponse = await response.json();
-      console.log('Claude API response:', claudeResponse);
-      
-      // Extract tool calls if any
-      const toolCalls = [];
-      const responseContent = claudeResponse.content || [];
-      
-      // Process content blocks for text and tool calls
-      let textContent = '';
-      
-      responseContent.forEach(block => {
-        if (block.type === 'text') {
-          textContent += block.text;
-        } else if (block.type === 'tool_use') {
-          toolCalls.push({
-            name: block.name,
-            parameters: block.parameters
+        const claudeResponse = await response.json();
+        console.log('Claude API response:', claudeResponse);
+
+        const responseContent = claudeResponse.content || [];
+        const toolUseBlocks = responseContent.filter(block => block.type === 'tool_use');
+        const textContent = responseContent
+          .filter(block => block.type === 'text')
+          .map(block => block.text)
+          .join('');
+
+        // Keep the assistant's raw content (including tool_use blocks) in the
+        // running history so Claude sees its own prior tool calls next round.
+        messages.push({ role: 'assistant', content: responseContent });
+
+        if (toolUseBlocks.length === 0 || claudeResponse.stop_reason !== 'tool_use') {
+          // Claude is done - no more tools requested.
+          return {
+            role: 'assistant',
+            content: textContent,
+            toolCalls: allToolCalls,
+            id: claudeResponse.id
+          };
+        }
+
+        // Execute every requested tool and report each result back to Claude.
+        const toolResultBlocks = [];
+        for (const block of toolUseBlocks) {
+          const toolCall = { name: block.name, parameters: block.input, id: block.id };
+          const execution = await this.executeToolCall(toolCall);
+
+          allToolCalls.push({ ...toolCall, ...execution });
+
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: JSON.stringify(execution.error ? { error: execution.error } : execution.result),
+            is_error: Boolean(execution.error)
           });
         }
-      });
-      
-      // Return the formatted response
+
+        messages.push({ role: 'user', content: toolResultBlocks });
+      }
+
+      // Hit the iteration cap - return whatever progress was made.
       return {
         role: 'assistant',
-        content: textContent,
-        toolCalls: toolCalls,
-        id: claudeResponse.id
+        content: 'I made several tool calls but stopped after reaching the maximum chain length. Let me know if you want me to continue.',
+        toolCalls: allToolCalls,
+        id: Date.now().toString()
       };
     } catch (error) {
       console.error('Error processing message:', error);
       return {
         role: 'assistant',
         content: `Sorry, I encountered an error while processing your request: ${error.message}`,
+        toolCalls: allToolCalls,
         id: Date.now().toString()
       };
     }

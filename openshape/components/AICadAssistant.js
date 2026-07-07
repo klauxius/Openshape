@@ -48,38 +48,44 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
     }
   }, [copiedId]);
 
-  // Handle executing tool calls
+  // Handle displaying (and, for tool calls not already run, executing) tool calls.
+  // The real Claude path in mcpClient.sendMessage already executes each tool as
+  // part of its chaining loop (so it can feed results back to Claude) - those
+  // calls arrive here with `result`/`error` already set and must not be re-run.
+  // The simulated/fallback path returns bare {name, parameters} calls that still
+  // need to be executed here.
   const handleToolCalls = async (toolCalls) => {
     if (!toolCalls || !toolCalls.length) return;
-    
+
     for (const toolCall of toolCalls) {
       try {
         // Format parameters to be more readable
         const formattedParams = JSON.stringify(toolCall.parameters, null, 2);
-        
+
         // Add a system message showing the tool call
         setMessages(prev => [
-          ...prev, 
-          { 
-            id: generateUniqueId(), 
-            role: 'system', 
+          ...prev,
+          {
+            id: generateUniqueId(),
+            role: 'system',
             type: 'tool_call',
             content: `Executing tool: ${toolCall.name}`,
             toolName: toolCall.name,
             parameters: formattedParams
           }
         ]);
-        
-        // Execute the tool call
-        const result = await mcpClient.executeToolCall(toolCall);
-        
+
+        // Already executed as part of the chaining loop in mcpClient.sendMessage?
+        const alreadyExecuted = 'result' in toolCall || 'error' in toolCall;
+        const result = alreadyExecuted ? toolCall : await mcpClient.executeToolCall(toolCall);
+
         // Add the result as a system message
         if (result.error) {
           setMessages(prev => [
-            ...prev, 
-            { 
-              id: generateUniqueId(), 
-              role: 'system', 
+            ...prev,
+            {
+              id: generateUniqueId(),
+              role: 'system',
               type: 'error',
               content: `Error: ${result.error}`
             }
@@ -87,10 +93,10 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
         } else {
           const successMessage = result.result?.message || 'Tool executed successfully';
           setMessages(prev => [
-            ...prev, 
-            { 
-              id: generateUniqueId(), 
-              role: 'system', 
+            ...prev,
+            {
+              id: generateUniqueId(),
+              role: 'system',
               type: 'success',
               content: successMessage
             }
@@ -99,10 +105,10 @@ const AICadAssistant = ({ isOpen, onToggle }) => {
       } catch (error) {
         console.error('Error executing tool call:', error);
         setMessages(prev => [
-          ...prev, 
-          { 
-            id: generateUniqueId(), 
-            role: 'system', 
+          ...prev,
+          {
+            id: generateUniqueId(),
+            role: 'system',
             type: 'error',
             content: `Error executing tool: ${error.message}`
           }

@@ -9,7 +9,7 @@ class MCPClient {
     this.tools = [];
     this.conversationId = null;
     this.apiEndpoint = '/api/claude';
-    this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-opus-20240229';
+    this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-sonnet-5';
   }
 
   /**

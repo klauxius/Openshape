@@ -14,7 +14,7 @@ export default async function handler(req, res) {
       || process.env.NEXT_PUBLIC_CLAUDE_API_KEY
       || process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY;
     const apiEndpoint = process.env.CLAUDE_API_ENDPOINT || process.env.NEXT_PUBLIC_CLAUDE_API_ENDPOINT || 'https://api.anthropic.com/v1/messages';
-    const model = process.env.CLAUDE_MODEL || process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-7-sonnet-20250219';
+    const model = process.env.CLAUDE_MODEL || process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-sonnet-5';
     
     if (!apiKey) {
       console.error('No Claude API key found in environment variables');

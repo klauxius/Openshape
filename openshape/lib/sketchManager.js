@@ -686,6 +686,43 @@ class SketchManager {
     return this.activeSketch ? { ...this.activeSketch.parameters } : {};
   }
 
+  // Select a sketch for non-drawing operations such as the feature inspector.
+  // This deliberately does not enter sketch mode; callers that want to draw
+  // should still use the normal enter-sketch flow.
+  selectSketch(sketchId) {
+    const sketch = this.sketches[sketchId];
+    if (!sketch) throw new Error(`Sketch not found: ${sketchId}`);
+    this.activeSketch = sketch;
+    return sketch;
+  }
+
+  // Update the linked extrusion in place. Keeping this operation here means
+  // both the UI and tools use the same rebuild path as parametric sketches.
+  setExtrusionHeight(height, sketchId = this.activeSketch?.id) {
+    const sketch = sketchId ? this.sketches[sketchId] : null;
+    if (!sketch) throw new Error('Sketch not found');
+    if (!sketch.extrusion) throw new Error('This sketch has not been extruded');
+
+    this.activeSketch = sketch;
+
+    const numeric = typeof height === 'number' ? height : parseFloat(height);
+    if (!Number.isFinite(numeric) || numeric === 0) {
+      throw new Error('Extrude depth must be a non-zero number');
+    }
+
+    sketch.extrusion.height = numeric;
+    sketch.updatedAt = new Date();
+    this.#rebuildExtrusion(sketch);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:featureChanged', {
+        detail: { sketchId: sketch.id, feature: 'extrusion', height: numeric }
+      }));
+    }
+
+    return { ...sketch.extrusion };
+  }
+
   // Rebuild the solid produced from a sketch's current profile + parametric
   // extrude height, updating the existing model in place.
   #rebuildExtrusion(sketch) {

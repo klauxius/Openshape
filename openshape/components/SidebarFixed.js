@@ -40,6 +40,9 @@ const SidebarFixed = ({ isOpen, onClose }) => {
   const [expandedFeatures, setExpandedFeatures] = useState({});
   const [filterText, setFilterText] = useState('');
   const [selectedItemId, setSelectedItemId] = useState(null);
+  const [selectedFeature, setSelectedFeature] = useState(null);
+  const [inspectorError, setInspectorError] = useState('');
+  const [newParameter, setNewParameter] = useState({ name: '', value: '' });
   
   // Context menu state
   const [contextMenu, setContextMenu] = useState({
@@ -56,6 +59,13 @@ const SidebarFixed = ({ isOpen, onClose }) => {
 
   // Load model data
   useEffect(() => {
+    const refreshTree = () => {
+      setModels(modelStore.getAllModels());
+      setSketches(Object.values(sketchManager.sketches || {}));
+      const activeModel = modelStore.getActiveModel();
+      setActiveModelId(activeModel ? activeModel.id : null);
+    };
+
     // Initial load of models
     const initialModels = modelStore.getAllModels();
     setModels(initialModels);
@@ -79,14 +89,7 @@ const SidebarFixed = ({ isOpen, onClose }) => {
         return;
       }
       
-      // Update models list
-      setModels(modelStore.getAllModels());
-      
-      // Update active model
-      const newActiveModel = modelStore.getActiveModel();
-      if (newActiveModel) {
-        setActiveModelId(newActiveModel.id);
-      }
+      refreshTree();
     };
     
     // Listen for sketch creation
@@ -107,11 +110,17 @@ const SidebarFixed = ({ isOpen, onClose }) => {
     window.addEventListener('openshape:modelChanged', handleModelChanged);
     window.addEventListener('openshape:sketchCreated', handleSketchCreated);
     window.addEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
+    window.addEventListener('openshape:parametersChanged', refreshTree);
+    window.addEventListener('openshape:sketchExtruded', refreshTree);
+    window.addEventListener('openshape:featureChanged', refreshTree);
     
     return () => {
       window.removeEventListener('openshape:modelChanged', handleModelChanged);
       window.removeEventListener('openshape:sketchCreated', handleSketchCreated);
       window.removeEventListener('openshape:sketchModeChanged', handleSketchModeChanged);
+      window.removeEventListener('openshape:parametersChanged', refreshTree);
+      window.removeEventListener('openshape:sketchExtruded', refreshTree);
+      window.removeEventListener('openshape:featureChanged', refreshTree);
     };
   }, []);
   
@@ -164,6 +173,13 @@ const SidebarFixed = ({ isOpen, onClose }) => {
     if (id.startsWith('sketch_')) {
       // Just select the sketch without entering sketch mode
       // The enterSketchMode function in the context menu will handle activating the sketch
+      try {
+        sketchManager.selectSketch(id);
+        setSelectedFeature({ type: 'sketch', sketchId: id });
+        setInspectorError('');
+      } catch (error) {
+        setInspectorError(error.message);
+      }
     }
     
     // Handle part library selection - open the insert dialog for the chosen primitive.
@@ -175,6 +191,53 @@ const SidebarFixed = ({ isOpen, onClose }) => {
       });
       window.dispatchEvent(event);
     }
+  };
+
+  const selectExtrusion = (sketch) => {
+    setSelectedItemId(`extrusion_${sketch.id}`);
+    setSelectedFeature({ type: 'extrusion', sketchId: sketch.id });
+    setInspectorError('');
+  };
+
+  const commitParameter = (sketchId, name, value) => {
+    try {
+      sketchManager.selectSketch(sketchId);
+      sketchManager.setParameter(name, value);
+      setInspectorError('');
+    } catch (error) {
+      setInspectorError(error.message);
+    }
+  };
+
+  const commitExtrusionHeight = (sketchId, value) => {
+    try {
+      sketchManager.setExtrusionHeight(value, sketchId);
+      setInspectorError('');
+    } catch (error) {
+      setInspectorError(error.message);
+    }
+  };
+
+  const addParameter = (event, sketch) => {
+    event.preventDefault();
+    const name = newParameter.name.trim();
+    const value = parseFloat(newParameter.value);
+
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      setInspectorError('Parameter names must start with a letter or underscore and use only letters, numbers, or underscores.');
+      return;
+    }
+    if (!Number.isFinite(value)) {
+      setInspectorError('Parameter value must be numeric.');
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(sketch.parameters || {}, name)) {
+      setInspectorError(`A parameter named "${name}" already exists.`);
+      return;
+    }
+
+    commitParameter(sketch.id, name, value);
+    setNewParameter({ name: '', value: '' });
   };
   
   // Show context menu on right click
@@ -307,29 +370,12 @@ const SidebarFixed = ({ isOpen, onClose }) => {
   // Get all sketches, make sure we're working with an array
   const allSketches = Array.isArray(sketches) ? sketches : [];
   
-  // Filter features (separate from regular models)
-  const features = filteredModels.filter(model => {
-    const name = model.name.toLowerCase();
-    return (
-      name.includes('extrude') || 
-      name.includes('fillet') ||
-      name.includes('shell') ||
-      name.includes('hole') ||
-      name.includes('boolean') ||
-      name.includes('union') ||
-      name.includes('subtract') ||
-      (name.includes('sketch') && !name.includes('plane'))
-    );
-  });
-  
-  // Group features by sketch
-  const getSketchFeatures = (sketchId) => {
-    return features.filter(feature => {
-      const name = feature.name.toLowerCase();
-      return name.includes(sketchId) || 
-        (name.includes('extrude') && name.includes(sketchId.replace('sketch_', '')));
-    });
-  };
+  // The feature tree comes from sketch ownership, rather than inferred model
+  // names. Each sketch is a feature and its linked extrusion is its child.
+  const features = allSketches.flatMap(sketch => [
+    { id: sketch.id, type: 'sketch', sketch },
+    ...(sketch.extrusion ? [{ id: `extrusion_${sketch.id}`, type: 'extrusion', sketch }] : [])
+  ]);
   
   // Filter regular parts (not features)
   const parts = filteredModels.filter(model => {
@@ -391,7 +437,7 @@ const SidebarFixed = ({ isOpen, onClose }) => {
                   <ChevronDown size={16} className="text-gray-500 mr-2" /> : 
                   <ChevronRight size={16} className="text-gray-500 mr-2" />
                 }
-                <span className="font-medium">Features</span>
+                <span className="font-medium">Feature Tree</span>
               </div>
               <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
                 {features.length}
@@ -400,8 +446,7 @@ const SidebarFixed = ({ isOpen, onClose }) => {
             
             {expandedSections.features && (
               <div className="pl-8 pr-4 pb-2 space-y-1">
-                {/* Force display "No features yet" message if there are no real features from the model store */}
-                {filteredModels.length === 0 || features.length === 0 ? (
+                {features.length === 0 ? (
                   <div className="text-sm text-gray-500 italic py-1">No features yet</div>
                 ) : (
                   features.map(feature => (
@@ -410,13 +455,17 @@ const SidebarFixed = ({ isOpen, onClose }) => {
                       className={`flex items-center py-1 px-2 rounded text-sm cursor-pointer ${
                         selectedItemId === feature.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'
                       }`}
-                      onClick={() => handleItemClick(feature.id)}
+                      onClick={() => feature.type === 'extrusion'
+                        ? selectExtrusion(feature.sketch)
+                        : handleItemClick(feature.id)}
                     >
                       <div className="mr-2">
-                        {getFeatureIcon(feature)}
+                        {feature.type === 'extrusion'
+                          ? <ArrowUp size={16} className="text-green-600" />
+                          : <Edit size={16} className="text-blue-600" />}
                       </div>
                       <span>
-                        {feature.name}
+                        {feature.type === 'extrusion' ? `Extrude (${feature.sketch.name})` : feature.sketch.name}
                       </span>
                     </div>
                   ))
@@ -609,21 +658,20 @@ const SidebarFixed = ({ isOpen, onClose }) => {
                             <div className="text-xs text-gray-500 italic py-1 pl-2">Empty sketch</div>
                           )}
                           
-                          {/* Operations based on this sketch */}
-                          {getSketchFeatures(sketch.id).map(feature => (
+                          {/* Linked, editable feature generated from this sketch */}
+                          {sketch.extrusion && (
                             <div 
-                              key={feature.id}
                               className={`flex items-center py-1 px-2 rounded text-sm cursor-pointer ${
-                                selectedItemId === feature.id ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'
+                                selectedItemId === `extrusion_${sketch.id}` ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'
                               }`}
-                              onClick={() => handleItemClick(feature.id)}
+                              onClick={() => selectExtrusion(sketch)}
                             >
                               <div className="mr-2">
-                                {getFeatureIcon(feature)}
+                                <ArrowUp size={16} className="text-green-600" />
                               </div>
-                              <span>{feature.name}</span>
+                              <span>Extrude</span>
                             </div>
-                          ))}
+                          )}
                         </div>
                       )}
                     </div>
@@ -633,6 +681,88 @@ const SidebarFixed = ({ isOpen, onClose }) => {
             )}
           </div>
           
+          {/* Inspector: edits real sketch parameters and linked feature depth. */}
+          <div className="border-b border-gray-200">
+            <div className="p-3">
+              <span className="font-medium">Inspector</span>
+            </div>
+            <div className="px-4 pb-4">
+              {!selectedFeature ? (
+                <p className="text-sm text-gray-500">Select a sketch or feature to edit it.</p>
+              ) : (() => {
+                const sketch = allSketches.find(item => item.id === selectedFeature.sketchId);
+                if (!sketch) return <p className="text-sm text-gray-500">Feature is no longer available.</p>;
+                const isExtrusion = selectedFeature.type === 'extrusion';
+                const parameterEntries = Object.entries(sketch.parameters || {});
+                return (
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-gray-500">{isExtrusion ? 'Extrude' : sketch.name}</p>
+                      <p className="text-sm font-medium text-gray-800">{isExtrusion ? sketch.name : `${sketch.plane.toUpperCase()} plane`}</p>
+                    </div>
+                    {isExtrusion && sketch.extrusion && (
+                      <label className="block text-sm text-gray-700">
+                        Depth
+                        <input
+                          key={`depth-${sketch.id}-${sketch.extrusion.height}`}
+                          type="number"
+                          step="any"
+                          defaultValue={sketch.extrusion.height}
+                          onBlur={(event) => commitExtrusionHeight(sketch.id, event.target.value)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                          className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                        />
+                      </label>
+                    )}
+                    {!isExtrusion && (
+                      <>
+                        {parameterEntries.map(([name, value]) => (
+                          <label key={`${sketch.id}-${name}`} className="block text-sm text-gray-700">
+                            {name}
+                            <input
+                              key={`${sketch.id}-${name}-${value}`}
+                              type="number"
+                              step="any"
+                              defaultValue={value}
+                              onBlur={(event) => commitParameter(sketch.id, name, event.target.value)}
+                              onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                              className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                            />
+                          </label>
+                        ))}
+                        <form className="border-t border-gray-200 pt-3 space-y-2" onSubmit={(event) => addParameter(event, sketch)}>
+                          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Add parameter</p>
+                          <input
+                            type="text"
+                            value={newParameter.name}
+                            onChange={(event) => setNewParameter(previous => ({ ...previous, name: event.target.value }))}
+                            placeholder="Name, e.g. wallThickness"
+                            className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                          />
+                          <input
+                            type="number"
+                            step="any"
+                            value={newParameter.value}
+                            onChange={(event) => setNewParameter(previous => ({ ...previous, value: event.target.value }))}
+                            placeholder="Value"
+                            className="block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            className="w-full rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                          >
+                            Add parameter
+                          </button>
+                        </form>
+                      </>
+                    )}
+                    {inspectorError && <p className="text-xs text-red-600">{inspectorError}</p>}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
           {/* Reference Geometry Section */}
           <div className="border-b border-gray-200">
             <div 
@@ -769,4 +899,4 @@ const SidebarFixed = ({ isOpen, onClose }) => {
   );
 };
 
-export default SidebarFixed; 
+export default SidebarFixed;

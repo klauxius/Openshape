@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_github_github__list_pull_requests",
+      "mcp__plugin_github_github__get_file_contents",
+      "Bash(git -C /home/clausius/Documents/GitHub/Openshape status)"
+    ]
+  }
+}

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
 
 interface DomViewCubeProps {
-  cameraRef: React.RefObject<THREE.Camera>
+  cameraRef: React.RefObject<THREE.PerspectiveCamera>
   controlsRef: React.RefObject<any> // OrbitControls type
   size?: number
   position?: {
@@ -48,7 +48,9 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
 
     // First check if we're at or very close to a standard view
     // If so, snap to exact standard view rotations for better alignment
-    const forward = camera.getWorldDirection(new THREE.Vector3()).normalize();
+    const forward = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(camera.quaternion)
+      .normalize();
     
     // Compare normalized directions with a dot product. A value of 1 means
     // the vectors point in exactly the same direction; a near-1 threshold is

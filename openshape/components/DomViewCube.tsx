@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
 
 interface DomViewCubeProps {
-  cameraRef: React.RefObject<THREE.Camera>
+  cameraRef: React.RefObject<THREE.PerspectiveCamera>
   controlsRef: React.RefObject<any> // OrbitControls type
   size?: number
   position?: {
@@ -48,54 +48,36 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
 
     // First check if we're at or very close to a standard view
     // If so, snap to exact standard view rotations for better alignment
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-    const up = camera.up.clone().normalize();
+    const forward = new THREE.Vector3(0, 0, -1)
+      .applyQuaternion(camera.quaternion)
+      .normalize();
     
-    // Check for standard views with a tolerance
-    const tolerance = 0.98; // Dot product tolerance (close to 1.0 means vectors are aligned)
-    
-    // Check main axes alignments
-    if (Math.abs(forward.x) > tolerance) {
-      // Looking along X axis
-      if (forward.x > 0) {
-        // Right view (+X)
-        setCameraRotation({ x: 0, y: 90, z: 0 });
-        return;
-      } else {
-        // Left view (-X)
-        setCameraRotation({ x: 0, y: -90, z: 0 });
-        return;
-      }
-    } else if (Math.abs(forward.y) > tolerance) {
-      // Looking along Y axis
-      if (forward.y > 0) {
-        // Bottom view (+Y)
-        setCameraRotation({ x: -90, y: 0, z: 0 });
-        return;
-      } else {
-        // Top view (-Y)
-        setCameraRotation({ x: 90, y: 0, z: 0 });
-        return;
-      }
-    } else if (Math.abs(forward.z) > tolerance) {
-      // Looking along Z axis
-      if (forward.z > 0) {
-        // Back view (+Z)
-        setCameraRotation({ x: 0, y: 180, z: 0 });
-        return;
-    } else {
-        // Front view (-Z)
-        setCameraRotation({ x: 0, y: 0, z: 0 });
-        return;
-      }
+    // Compare normalized directions with a dot product. A value of 1 means
+    // the vectors point in exactly the same direction; a near-1 threshold is
+    // necessary here because camera quaternions are floating-point values.
+    const tolerance = 0.999;
+    const standardViews = [
+      { direction: new THREE.Vector3(1, 0, 0), rotation: { x: 0, y: -90, z: 0 } }, // right
+      { direction: new THREE.Vector3(-1, 0, 0), rotation: { x: 0, y: 90, z: 0 } }, // left
+      { direction: new THREE.Vector3(0, 1, 0), rotation: { x: 90, y: 0, z: 0 } }, // bottom
+      { direction: new THREE.Vector3(0, -1, 0), rotation: { x: -90, y: 0, z: 0 } }, // top
+      { direction: new THREE.Vector3(0, 0, 1), rotation: { x: 0, y: 180, z: 0 } }, // back
+      { direction: new THREE.Vector3(0, 0, -1), rotation: { x: 0, y: 0, z: 0 } }, // front
+    ];
+
+    const standardView = standardViews.find(({ direction }) => forward.dot(direction) >= tolerance);
+    if (standardView) {
+      setCameraRotation(standardView.rotation);
+      return;
     }
     
-    // If not at a standard view, use quaternion-based rotation
-    const quaternion = camera.quaternion.clone();
+    // A view cube represents model axes as seen through the camera, so it
+    // must use the inverse camera orientation. Applying the camera rotation
+    // directly makes the cube orbit with the viewport instead of matching it.
+    const quaternion = camera.quaternion.clone().invert();
     const euler = new THREE.Euler().setFromQuaternion(quaternion, "XYZ");
     
-    // Convert to degrees and apply WITHOUT reversing signs
-    // This ensures the view cube rotates in the same direction as the camera
+    // Convert the inverse orientation to CSS rotation angles.
     const rotX = THREE.MathUtils.radToDeg(euler.x);
     const rotY = THREE.MathUtils.radToDeg(euler.y);
     const rotZ = THREE.MathUtils.radToDeg(euler.z);
@@ -267,16 +249,16 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
         x = 0; y = 180; z = 0;
         break;
       case "right":
-        x = 0; y = 90; z = 0; 
-        break;
-      case "left":
         x = 0; y = -90; z = 0;
         break;
+      case "left":
+        x = 0; y = 90; z = 0;
+        break;
       case "top":
-        x = 90; y = 0; z = 0;
+        x = -90; y = 0; z = 0;
         break;
       case "bottom":
-        x = -90; y = 0; z = 0;
+        x = 90; y = 0; z = 0;
         break;
     }
     
@@ -604,4 +586,3 @@ const DomViewCube: React.FC<DomViewCubeProps> = ({
 }
 
 export default DomViewCube
-

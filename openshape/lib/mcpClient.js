@@ -9,8 +9,7 @@ class MCPClient {
     this.tools = [];
     this.conversationId = null;
     this.apiEndpoint = '/api/claude';
-    this.apiKey = process.env.NEXT_PUBLIC_CLAUDE_API_KEY;
-    this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-3-opus-20240229';
+    this.modelName = process.env.NEXT_PUBLIC_CLAUDE_MODEL || 'claude-sonnet-5';
   }
 
   /**
@@ -39,113 +38,146 @@ class MCPClient {
   }
 
   /**
-   * Returns all registered tools in the format expected by Claude
+   * Returns all registered tools in the format expected by Claude.
+   * Anthropic's tool schema requires the JSON schema under `input_schema`
+   * (not `parameters`) - the wire format differs from our internal
+   * registry field name.
    */
   getToolDefinitions() {
     return this.tools.map(tool => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters
+      input_schema: tool.parameters
     }));
   }
 
   /**
-   * Sends a message to Claude and handles tool calling
+   * Sends a message to Claude, running tools and feeding their results back
+   * until Claude stops requesting them (or a safety cap is hit). This lets
+   * Claude chain multiple tool calls in sequence, each informed by the
+   * previous one's result, rather than only ever executing the tool(s)
+   * from a single response.
    * @param {string} message - The user's message
    * @param {Array} conversation - The conversation history
-   * @returns {Promise<Object>} - Claude's response
+   * @returns {Promise<Object>} - Final assistant response plus every tool call made along the way
    */
   async sendMessage(message, conversation = []) {
-    if (!this.apiKey && !process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES) {
-      console.warn('Claude API key not set and simulated responses not enabled');
-      return {
-        role: 'assistant',
-        content: 'Sorry, I cannot process your request because the API key is not configured.',
-        id: Date.now().toString()
-      };
+    // Explicit dev opt-in: skip the real API entirely and use the local pattern matcher.
+    // Whether a Claude API key is configured is a server-side concern (see pages/api/claude.js);
+    // the client must not gate on it directly, since only NEXT_PUBLIC_-prefixed vars are visible
+    // here and the real key should never be exposed to the browser via that prefix.
+    if (process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
+      console.log('Using simulated responses for development');
+      return this.generateSimulatedResponse(message);
     }
 
-    try {
-      // Use simulated responses if enabled or no API key
-      if (!this.apiKey || process.env.NEXT_PUBLIC_USE_SIMULATED_RESPONSES === 'true') {
-        console.log('Using simulated responses for development');
-        return this.generateSimulatedResponse(message);
-      }
-      
-      // Format the conversation history for Claude API
-      const formattedMessages = conversation.map(msg => ({
+    // Anthropic message history: the running list of turns, including raw
+    // tool_use/tool_result content blocks (not the flattened {role, content}
+    // string shape the chat UI stores its own history in). The UI also keeps
+    // 'system' role entries for tool-call/result bubbles - Claude's API only
+    // accepts user/assistant roles in `messages`, so those must be dropped.
+    const messages = conversation
+      .filter(msg => msg.role === 'user' || msg.role === 'assistant')
+      .map(msg => ({
         role: msg.role,
         content: msg.content
       }));
-      
-      // Add the current message
-      formattedMessages.push({
-        role: 'user',
-        content: message
-      });
-      
-      // Prepare the Claude API request
-      const claudeRequest = {
-        model: this.modelName,
-        messages: formattedMessages,
-        system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals.",
-        max_tokens: 4000,
-        temperature: 0.7,
-        tools: this.getToolDefinitions()
-      };
-      
-      console.log('Sending request via proxy API route:', this.apiEndpoint);
-      
-      // Make the API call via our proxy route
-      const response = await fetch(this.apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(claudeRequest)
-      });
-      
-      // Handle API errors
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Claude API error:', errorText);
-        throw new Error(`API error: ${response.status} - ${errorText}`);
-      }
-      
-      // Parse the response
-      const claudeResponse = await response.json();
-      console.log('Claude API response:', claudeResponse);
-      
-      // Extract tool calls if any
-      const toolCalls = [];
-      const responseContent = claudeResponse.content || [];
-      
-      // Process content blocks for text and tool calls
-      let textContent = '';
-      
-      responseContent.forEach(block => {
-        if (block.type === 'text') {
-          textContent += block.text;
-        } else if (block.type === 'tool_use') {
-          toolCalls.push({
-            name: block.name,
-            parameters: block.parameters
+    messages.push({ role: 'user', content: message });
+
+    const allToolCalls = [];
+    const MAX_TOOL_ITERATIONS = 8;
+
+    try {
+      for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+        const claudeRequest = {
+          model: this.modelName,
+          messages,
+          system: "You are Clapeyron, an advanced AI CAD assistant for OpenShape, a browser-based CAD platform. You help users design 3D models through natural language commands. Focus on understanding design intent, generating precise 3D geometry, and explaining CAD concepts clearly. Always use the tools available to you to accomplish the user's goals. When a task needs multiple steps (e.g. creating a sketch, then drawing geometry in it, then extruding), call the tools one at a time and use each result to decide the next step.",
+          max_tokens: 4000,
+          tools: this.getToolDefinitions()
+        };
+
+        console.log('Sending request via proxy API route:', this.apiEndpoint);
+
+        const response = await fetch(this.apiEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(claudeRequest)
+        });
+
+        // Handle API errors
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Claude API error:', errorText);
+
+          // Server has no API key configured - fall back to the local pattern matcher
+          // instead of surfacing a hard error to the user.
+          if (response.status === 500 && errorText.includes('API key not configured')) {
+            console.warn('Claude API key not configured on server; using simulated responses');
+            return this.generateSimulatedResponse(message);
+          }
+
+          throw new Error(`API error: ${response.status} - ${errorText}`);
+        }
+
+        const claudeResponse = await response.json();
+        console.log('Claude API response:', claudeResponse);
+
+        const responseContent = claudeResponse.content || [];
+        const toolUseBlocks = responseContent.filter(block => block.type === 'tool_use');
+        const textContent = responseContent
+          .filter(block => block.type === 'text')
+          .map(block => block.text)
+          .join('');
+
+        // Keep the assistant's raw content (including tool_use blocks) in the
+        // running history so Claude sees its own prior tool calls next round.
+        messages.push({ role: 'assistant', content: responseContent });
+
+        if (toolUseBlocks.length === 0 || claudeResponse.stop_reason !== 'tool_use') {
+          // Claude is done - no more tools requested.
+          return {
+            role: 'assistant',
+            content: textContent,
+            toolCalls: allToolCalls,
+            id: claudeResponse.id
+          };
+        }
+
+        // Execute every requested tool and report each result back to Claude.
+        const toolResultBlocks = [];
+        for (const block of toolUseBlocks) {
+          const toolCall = { name: block.name, parameters: block.input, id: block.id };
+          const execution = await this.executeToolCall(toolCall);
+
+          allToolCalls.push({ ...toolCall, ...execution });
+
+          toolResultBlocks.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: JSON.stringify(execution.error ? { error: execution.error } : execution.result),
+            is_error: Boolean(execution.error)
           });
         }
-      });
-      
-      // Return the formatted response
+
+        messages.push({ role: 'user', content: toolResultBlocks });
+      }
+
+      // Hit the iteration cap - return whatever progress was made.
       return {
         role: 'assistant',
-        content: textContent,
-        toolCalls: toolCalls,
-        id: claudeResponse.id
+        content: 'I made several tool calls but stopped after reaching the maximum chain length. Let me know if you want me to continue.',
+        toolCalls: allToolCalls,
+        id: Date.now().toString()
       };
     } catch (error) {
       console.error('Error processing message:', error);
       return {
         role: 'assistant',
         content: `Sorry, I encountered an error while processing your request: ${error.message}`,
+        toolCalls: allToolCalls,
         id: Date.now().toString()
       };
     }
@@ -606,9 +638,23 @@ class MCPClient {
     // Drawing in sketch patterns
     else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['line']) && 
             this.matchesPattern(lowerMessage, ['in', 'to', 'on'], ['sketch'])) {
+      // Parse "from [x, y] to [x, y]" if provided, otherwise use a default segment.
+      let startPoint = [0, 0];
+      let endPoint = [10, 0];
+      const pointMatches = [...message.matchAll(/\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?/g)];
+      if (pointMatches.length >= 2) {
+        startPoint = [parseFloat(pointMatches[0][1]), parseFloat(pointMatches[0][2])];
+        endPoint = [parseFloat(pointMatches[1][1]), parseFloat(pointMatches[1][2])];
+      }
+
       return {
-        content: `To draw a line in the sketch, select the Line tool from the sketch toolbar and click two points to define the line.`,
-        systemMessage: "The system is currently in sketch mode. Please use the sketch tools to create geometry."
+        content: `I'll add a line from [${startPoint}] to [${endPoint}] in the sketch.`,
+        toolCalls: [
+          {
+            name: 'cadAddLineToSketch',
+            parameters: { startPoint, endPoint }
+          }
+        ]
       };
     }
     else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['circle']) && 
@@ -642,13 +688,37 @@ class MCPClient {
         ]
       };
     }
-    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['rectangle', 'polygon']) && 
+    else if (this.matchesPattern(lowerMessage, ['draw', 'create', 'add'], ['rectangle']) && 
             this.matchesPattern(lowerMessage, ['in', 'to', 'on'], ['sketch'])) {
-      const shape = lowerMessage.includes('rectangle') ? 'rectangle' : 'polygon';
-      
+      // Parse dimensions like "10 by 6", "10x6", or "width 10 height 6".
+      let width = 10;
+      let height = 10;
+      let center = [0, 0];
+
+      const byMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:by|x|×|\*)\s*(\d+(?:\.\d+)?)/i);
+      if (byMatch) {
+        width = parseFloat(byMatch[1]);
+        height = parseFloat(byMatch[2]);
+      } else {
+        const widthMatch = message.match(/width\s*[=:]?\s*(\d+(?:\.\d+)?)/i);
+        const heightMatch = message.match(/height\s*[=:]?\s*(\d+(?:\.\d+)?)/i);
+        if (widthMatch) width = parseFloat(widthMatch[1]);
+        if (heightMatch) height = parseFloat(heightMatch[1]);
+      }
+
+      const centerMatch = message.match(/at\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?/i);
+      if (centerMatch) {
+        center = [parseFloat(centerMatch[1]), parseFloat(centerMatch[2])];
+      }
+
       return {
-        content: `To draw a ${shape} in the sketch, select the ${shape} tool from the sketch toolbar and define the shape parameters.`,
-        systemMessage: "The system is currently in sketch mode. Please use the sketch tools to create geometry."
+        content: `I'll add a ${width}×${height} rectangle at [${center}] to the sketch.`,
+        toolCalls: [
+          {
+            name: 'cadAddRectangleToSketch',
+            parameters: { center, width, height }
+          }
+        ]
       };
     }
     else if (this.matchesPattern(lowerMessage, ['exit', 'finish', 'end', 'close'], ['sketch'])) {
@@ -659,12 +729,17 @@ class MCPClient {
     }
     else if (this.matchesPattern(lowerMessage, ['extrude'], ['sketch'])) {
       // Extract height if present
-      const heightMatch = lowerMessage.match(/height\s+(\d+)/i) || lowerMessage.match(/(\d+)\s*mm/i);
+      const heightMatch = lowerMessage.match(/height\s+(\d+(?:\.\d+)?)/i) || lowerMessage.match(/(\d+(?:\.\d+)?)\s*mm/i);
       const height = heightMatch ? Number(heightMatch[1]) : 10;
       
       return {
         content: `I'll extrude the sketch to a height of ${height}mm.`,
-        systemMessage: "The system will prompt for extrusion height and extrude the current sketch."
+        toolCalls: [
+          {
+            name: 'cadExtrudeSketch',
+            parameters: { height }
+          }
+        ]
       };
     }
     // Default response if no pattern matches

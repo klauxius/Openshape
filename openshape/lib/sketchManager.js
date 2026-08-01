@@ -6,6 +6,9 @@ import * as jscad from '@jscad/modeling';
 const { colorize } = jscad.colors;
 
 import { modelStore, notifyModelChanged } from './mcpTools';
+import planeManager from './planeManager';
+import { basePlaneFrame, frameMatrix, to3D } from './planeFrame';
+import { solveConstraints } from './constraintSolver.mjs';
 
 class SketchManager {
   constructor() {
@@ -44,71 +47,70 @@ class SketchManager {
 
   // [Existing createSketch method with enhancements]
   createSketch(planeInfo, layer = 'default') {
-    if (!['xy', 'yz', 'xz', 'custom'].includes(planeInfo.plane)) {
-      throw new Error('Invalid plane specified');
-    }
-    if (planeInfo.plane === 'custom' && typeof planeInfo.offset !== 'number') {
-      throw new Error('Custom plane requires numeric offset');
+    // Resolve the sketch's plane frame. A sketch may be created on:
+    //   - a named datum plane:   { planeId }
+    //   - an explicit frame:     { frame }
+    //   - a base plane (+offset): { plane: 'xy'|'yz'|'xz'|'custom', offset }
+    let frame;
+    let planeLabel = planeInfo.plane || 'custom';
+    let offset = planeInfo.offset || 0;
+    let planeId = null;
+
+    if (planeInfo.frame) {
+      frame = planeInfo.frame;
+    } else if (planeInfo.planeId) {
+      const datum = planeManager.getPlane(planeInfo.planeId);
+      if (!datum) throw new Error(`Datum plane not found: ${planeInfo.planeId}`);
+      frame = datum.frame;
+      planeId = datum.id;
+      planeLabel = datum.definition.basePlane || 'custom';
+      offset = datum.definition.offset || 0;
+    } else {
+      if (!['xy', 'yz', 'xz', 'custom'].includes(planeInfo.plane)) {
+        throw new Error('Invalid plane specified');
+      }
+      if (planeInfo.plane === 'custom' && typeof planeInfo.offset !== 'number') {
+        throw new Error('Custom plane requires numeric offset');
+      }
+      frame = basePlaneFrame(planeInfo.plane, offset);
     }
 
     const sketchId = `sketch_${this.nextSketchId++}`;
     const sketch = {
       id: sketchId,
       name: `Sketch ${this.nextSketchId - 1}`,
-      plane: planeInfo.plane,
-      offset: planeInfo.offset || 0,
+      plane: planeLabel,
+      offset,
+      // Rigorous plane definition (origin + orthonormal u/v/w). All plane-aware
+      // math (transform, extrude orientation, camera, drawing) uses this.
+      frame,
+      planeId,
       entities: [],
+      // Named parametric variables that entity dimensions / the extrusion can
+      // reference by name. Changing one via setParameter() rebuilds everything
+      // that depends on it.
+      parameters: (planeInfo.parameters && typeof planeInfo.parameters === 'object')
+        ? { ...planeInfo.parameters }
+        : {},
+      // Link to the solid produced by extruding this sketch (kept so parameter
+      // changes can rebuild it in place).
+      extrusion: null,
+      // Geometric relations (coincident, horizontal, parallel, ...) solved by
+      // the constraint solver over the sketch's points.
+      constraints: [],
       createdAt: new Date(),
       updatedAt: new Date(),
       isActive: true,
-      layer: layer,
-      constraints: {}
+      layer: layer
     };
 
-    // Create a visualization of the sketch plane
+    // Create a visualization of the sketch plane, oriented by its frame.
     const planeSize = 10;
-    let planeVisualization;
-    
-    // Use cuboid directly instead of trying to extrude a 2D rectangle
-    // This avoids the "slices must have 3 or more edges" error
-    switch (planeInfo.plane) {
-      case 'yz': {
-        // YZ plane at specified X
-        planeVisualization = jscad.primitives.cuboid({ 
-          size: [0.01, planeSize * 2, planeSize * 2] 
-        });
-        planeVisualization = jscad.transforms.translate(
-          [sketch.offset, 0, 0], 
-          planeVisualization
-        );
-        break;
-      }
-      case 'xz': {
-        // XZ plane at specified Y
-        planeVisualization = jscad.primitives.cuboid({ 
-          size: [planeSize * 2, 0.01, planeSize * 2] 
-        });
-        planeVisualization = jscad.transforms.translate(
-          [0, sketch.offset, 0], 
-          planeVisualization
-        );
-        break;
-      }
-      case 'custom':
-      case 'xy':
-      default: {
-        // XY plane at specified Z
-        planeVisualization = jscad.primitives.cuboid({ 
-          size: [planeSize * 2, planeSize * 2, 0.01] 
-        });
-        planeVisualization = jscad.transforms.translate(
-          [0, 0, sketch.offset], 
-          planeVisualization
-        );
-        break;
-      }
-    }
-    
+    let planeVisualization = jscad.primitives.cuboid({
+      size: [planeSize * 2, planeSize * 2, 0.01]
+    });
+    planeVisualization = jscad.transforms.transform(frameMatrix(frame), planeVisualization);
+
     // Add the plane visualization to the model store
     const planeModelId = modelStore.addModel(
       colorize([0.9, 0.9, 1, 0.2], planeVisualization),
@@ -122,9 +124,9 @@ class SketchManager {
     this.activeSketch = sketch;
     this.isInSketchMode = true;
     
-    // Determine camera view based on the plane
+    // Determine camera view based on the (base) plane
     let cameraView = 'front'; // default view (XY plane)
-    switch (planeInfo.plane) {
+    switch (planeLabel) {
       case 'yz':
         cameraView = 'right';
         break;
@@ -140,10 +142,10 @@ class SketchManager {
     const event = new CustomEvent('openshape:sketchCreated', {
       detail: { 
         sketchId, 
-        sketch, // Include the entire sketch object
-        plane: planeInfo.plane,
+        sketch, // Include the entire sketch object (with its frame)
+        plane: planeLabel,
         cameraView, 
-        offset: planeInfo.offset || 0
+        offset
       }
     });
     window.dispatchEvent(event);
@@ -153,7 +155,7 @@ class SketchManager {
       detail: {
         active: true,
         sketch,
-        plane: planeInfo.plane
+        plane: planeLabel
       }
     });
     window.dispatchEvent(modeEvent);
@@ -191,7 +193,13 @@ class SketchManager {
   // [Enhanced entity management with constraints and history]
   addEntity(type, params) {
     if (!this.activeSketch) throw new Error('No active sketch');
-    
+
+    // Resolve any parametric bindings: a dimension given as a parameter-name
+    // string (e.g. width: 'boxWidth') is recorded as a binding and replaced by
+    // the parameter's current numeric value for geometry generation.
+    const { resolved, bindings } = this.#resolveEntityParams(params);
+    params = resolved;
+
     // Apply grid snapping
     if (this.grid.snap) {
       params = this.#applyGridSnapping(type, params);
@@ -202,6 +210,7 @@ class SketchManager {
       id: entityId,
       type,
       params: this.#sanitizeParams(type, params),
+      bindings, // parameter-name bindings, e.g. { width: 'boxWidth' }
       createdAt: new Date(),
       updatedAt: new Date(),
       constraints: params.constraints || {}
@@ -602,6 +611,258 @@ class SketchManager {
     }
   }
 
+  // Split incoming params into resolved numeric params (for geometry) and a map
+  // of dimension->parameterName bindings for any dimension given as a string.
+  #resolveEntityParams(params) {
+    const bindings = {};
+    const resolved = { ...params };
+    const dimensionKeys = ['width', 'height', 'radius', 'innerRadius', 'outerRadius', 'size'];
+
+    for (const key of dimensionKeys) {
+      if (typeof resolved[key] === 'string') {
+        bindings[key] = resolved[key];
+        resolved[key] = this.#resolveValue(resolved[key]);
+      }
+    }
+
+    return { resolved, bindings };
+  }
+
+  // Resolve a value that may be a number or a parameter-name string.
+  #resolveValue(value) {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const params = this.activeSketch ? this.activeSketch.parameters : null;
+      if (params && typeof params[value] === 'number') return params[value];
+      const parsed = parseFloat(value);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+    return value;
+  }
+
+  // Define or update a named parameter and rebuild everything bound to it:
+  // every entity dimension bound to the parameter, and the linked extrusion.
+  setParameter(name, value) {
+    const sketch = this.activeSketch;
+    if (!sketch) throw new Error('No active sketch');
+    if (!name || typeof name !== 'string') throw new Error('Parameter name is required');
+
+    const numeric = typeof value === 'number' ? value : parseFloat(value);
+    if (Number.isNaN(numeric)) throw new Error(`Parameter value must be numeric, got: ${value}`);
+
+    sketch.parameters[name] = numeric;
+
+    // Update every entity dimension bound to this parameter.
+    for (const entity of [...sketch.entities]) {
+      if (!entity.bindings) continue;
+      const changed = {};
+      for (const [dimKey, paramName] of Object.entries(entity.bindings)) {
+        if (paramName === name) changed[dimKey] = numeric;
+      }
+      if (Object.keys(changed).length > 0) {
+        this.updateEntity(entity.id, changed);
+      }
+    }
+
+    // Re-solve constraints (e.g. a distance bound to this parameter) and keep
+    // the linked extrusion in sync. Solving rebuilds the extrusion itself.
+    if (sketch.constraints && sketch.constraints.length > 0) {
+      this.#solveSketchConstraints(sketch);
+    } else if (sketch.extrusion) {
+      this.#rebuildExtrusion(sketch);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:parametersChanged', {
+        detail: { sketchId: sketch.id, name, value: numeric, parameters: { ...sketch.parameters } }
+      }));
+    }
+
+    return { ...sketch.parameters };
+  }
+
+  // Get the current parameter map for the active sketch.
+  getParameters() {
+    return this.activeSketch ? { ...this.activeSketch.parameters } : {};
+  }
+
+  // Select a sketch for non-drawing operations such as the feature inspector.
+  // This deliberately does not enter sketch mode; callers that want to draw
+  // should still use the normal enter-sketch flow.
+  selectSketch(sketchId) {
+    const sketch = this.sketches[sketchId];
+    if (!sketch) throw new Error(`Sketch not found: ${sketchId}`);
+    this.activeSketch = sketch;
+    return sketch;
+  }
+
+  // Update the linked extrusion in place. Keeping this operation here means
+  // both the UI and tools use the same rebuild path as parametric sketches.
+  setExtrusionHeight(height, sketchId = this.activeSketch?.id) {
+    const sketch = sketchId ? this.sketches[sketchId] : null;
+    if (!sketch) throw new Error('Sketch not found');
+    if (!sketch.extrusion) throw new Error('This sketch has not been extruded');
+
+    this.activeSketch = sketch;
+
+    const numeric = typeof height === 'number' ? height : parseFloat(height);
+    if (!Number.isFinite(numeric) || numeric === 0) {
+      throw new Error('Extrude depth must be a non-zero number');
+    }
+
+    sketch.extrusion.height = numeric;
+    sketch.updatedAt = new Date();
+    this.#rebuildExtrusion(sketch);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:featureChanged', {
+        detail: { sketchId: sketch.id, feature: 'extrusion', height: numeric }
+      }));
+    }
+
+    return { ...sketch.extrusion };
+  }
+
+  // Rebuild the solid produced from a sketch's current profile + parametric
+  // extrude height, updating the existing model in place.
+  #rebuildExtrusion(sketch) {
+    const ext = sketch.extrusion;
+    if (!ext) return;
+
+    const profile = this.#buildExtrudableProfile(sketch);
+    if (!profile) return;
+
+    const height = this.#resolveValue(ext.height);
+    const extruded = jscad.extrusions.extrudeLinear({ height, twistAngle: 0 }, profile);
+    const oriented = this.#orientToSketchPlane(extruded, sketch);
+
+    modelStore.updateModel(ext.modelId, { geometry: oriented });
+    notifyModelChanged({ id: ext.modelId, geometry: oriented, isVisible: true });
+  }
+
+  // Add a geometric relation between sketch entities, then solve the sketch.
+  // Supported: coincident, horizontal, vertical, parallel, perpendicular,
+  // equal, distance (a.k.a length), and fixed. Line-based constraints accept a
+  // line entity id (created via connectPoints) or two point ids; coincident and
+  // fixed take point ids. `value` (for distance) may be a number or the name of
+  // a sketch parameter.
+  addConstraint(type, entities = [], value) {
+    const sketch = this.activeSketch;
+    if (!sketch) throw new Error('No active sketch');
+
+    const supported = ['coincident', 'horizontal', 'vertical', 'parallel', 'perpendicular', 'equal', 'distance', 'length', 'fixed'];
+    if (!supported.includes(type)) {
+      throw new Error(`Unsupported constraint type: ${type}`);
+    }
+
+    const constraint = {
+      id: `constraint_${sketch.id}_${sketch.constraints.length + 1}`,
+      type,
+      entities: Array.isArray(entities) ? [...entities] : [entities],
+      value
+    };
+
+    if (type === 'fixed') {
+      const pt = sketch.entities.find(e => e.id === constraint.entities[0] && e.type === 'point');
+      if (!pt) throw new Error('fixed constraint requires a point entity id');
+      pt.params.fixed = true;
+    }
+
+    sketch.constraints.push(constraint);
+
+    this.#solveSketchConstraints(sketch);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:constraintAdded', {
+        detail: { sketchId: sketch.id, constraint }
+      }));
+    }
+
+    return constraint;
+  }
+
+  getConstraints() {
+    return this.activeSketch ? this.activeSketch.constraints.map(c => ({ ...c })) : [];
+  }
+
+  // Map a stored constraint into the solver's schema, resolving line entities to
+  // their endpoint point ids and parametric distance values to numbers.
+  #resolveConstraintForSolver(sketch, c) {
+    const lineEndpoints = (ref) => {
+      const ent = sketch.entities.find(e => e.id === ref);
+      if (ent && ent.type === 'line' && ent.params.startPointId && ent.params.endPointId) {
+        return [ent.params.startPointId, ent.params.endPointId];
+      }
+      return null;
+    };
+
+    switch (c.type) {
+      case 'coincident':
+        return { type: 'coincident', a: c.entities[0], b: c.entities[1] };
+      case 'horizontal':
+      case 'vertical':
+      case 'distance':
+      case 'length': {
+        let line = lineEndpoints(c.entities[0]);
+        if (!line && c.entities.length >= 2) line = [c.entities[0], c.entities[1]];
+        if (!line) return null;
+        const out = { type: c.type === 'length' ? 'distance' : c.type, line };
+        if (c.type === 'distance' || c.type === 'length') out.value = this.#resolveValue(c.value);
+        return out;
+      }
+      case 'parallel':
+      case 'perpendicular':
+      case 'equal': {
+        const l1 = lineEndpoints(c.entities[0]);
+        const l2 = lineEndpoints(c.entities[1]);
+        if (!l1 || !l2) return null;
+        return { type: c.type, line1: l1, line2: l2 };
+      }
+      default:
+        return null;
+    }
+  }
+
+  // Solve all constraints on a sketch and write updated point positions back
+  // (regenerating connected lines and any linked extrusion).
+  #solveSketchConstraints(sketch = this.activeSketch) {
+    if (!sketch || !sketch.constraints || sketch.constraints.length === 0) return;
+
+    const pointEntities = sketch.entities.filter(e => e.type === 'point');
+    if (pointEntities.length === 0) return;
+
+    // Anchor the first point when nothing is explicitly fixed so the solve is
+    // well-posed and the sketch doesn't drift.
+    const anyFixed = pointEntities.some(e => e.params.fixed);
+    const inputPoints = pointEntities.map((e, idx) => ({
+      id: e.id,
+      x: e.params.position[0],
+      y: e.params.position[1],
+      fixed: e.params.fixed ? true : (!anyFixed && idx === 0)
+    }));
+
+    const solverConstraints = sketch.constraints
+      .map(c => this.#resolveConstraintForSolver(sketch, c))
+      .filter(Boolean);
+
+    if (solverConstraints.length === 0) return;
+
+    const solved = solveConstraints(inputPoints, solverConstraints);
+
+    for (const e of pointEntities) {
+      const p = solved.get(e.id);
+      if (!p) continue;
+      const cur = e.params.position;
+      if (Math.abs(cur[0] - p.x) > 1e-9 || Math.abs(cur[1] - p.y) > 1e-9) {
+        this.updateEntity(e.id, { position: [p.x, p.y] });
+      }
+    }
+
+    if (sketch.extrusion) {
+      this.#rebuildExtrusion(sketch);
+    }
+  }
+
   // [Layer management]
   toggleLayerVisibility(layerId) {
     const layer = this.layers[layerId];
@@ -619,41 +880,131 @@ class SketchManager {
   }
 
   // [Enhanced extrusion validation]
-  extrudeActiveSketch(height) {
+  extrudeActiveSketch(height = 5) {
     if (!this.activeSketch || this.activeSketch.entities.length === 0) {
       throw new Error('No active sketch or sketch is empty');
     }
 
-    const sketchGeometries = this.activeSketch.entities
-      .map(entity => modelStore.getModel(entity.modelId)?.geometry)
-      .filter(Boolean);
-
-    if (sketchGeometries.length === 0) {
-      throw new Error('No valid geometries in sketch');
-    }
-
-    try {
-      jscad.measurements.measureVolume(
-        jscad.booleans.union(sketchGeometries)
+    // Build a real 2D profile (JSCAD geom2) from the sketch's closed shapes.
+    // Points and open segments are ignored - they can't define a solid.
+    const profile = this.#buildExtrudableProfile(this.activeSketch);
+    if (!profile) {
+      throw new Error(
+        'Sketch has no closed profile to extrude. Draw a rectangle, circle, or a closed loop of lines first.'
       );
-    } catch (e) {
-      throw new Error('Invalid geometry for extrusion');
     }
 
-    // Create extrusion
-    const unionGeometry = jscad.booleans.union(sketchGeometries);
-    const extruded = jscad.extrusions.extrudeLinear(
-      { height, twistAngle: 0 }, 
-      unionGeometry
-    );
-    
-    // Add it to model store
-    const modelId = modelStore.addModel(extruded, `extrusion_${this.activeSketch.id}`);
-    
-    // Notify about the new model
-    notifyModelChanged({ id: modelId, geometry: extruded, isVisible: true });
-    
+    // Height may itself be parametric (a parameter-name string). Keep the
+    // authored value on the sketch so parameter changes can re-extrude.
+    const resolvedHeight = this.#resolveValue(height);
+
+    // extrudeLinear extrudes a 2D profile along +Z; reorient the result onto
+    // the sketch plane (and apply the plane offset) so YZ/XZ sketches extrude
+    // along the correct axis.
+    const extruded = jscad.extrusions.extrudeLinear({ height: resolvedHeight, twistAngle: 0 }, profile);
+    const oriented = this.#orientToSketchPlane(extruded, this.activeSketch);
+
+    const modelId = modelStore.addModel(oriented, `extrusion_${this.activeSketch.id}`);
+    // Remember the sketch -> solid link (with the authored, possibly parametric
+    // height) so setParameter() can rebuild this solid in place.
+    this.activeSketch.extrusion = { modelId, height };
+    notifyModelChanged({ id: modelId, geometry: oriented, isVisible: true });
+
+    // Let the viewer frame the freshly created solid (e.g. isometric view) so
+    // the extruded 3D result is obvious instead of being seen edge-on.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('openshape:sketchExtruded', { detail: { modelId } }));
+    }
+
     return modelId;
+  }
+
+  // Build a single 2D profile (geom2) from the closed shapes in the active
+  // sketch. Rectangles and circles map directly to JSCAD primitives; connected
+  // line segments are assembled into a closed polygon. Multiple profiles are
+  // unioned together. Returns null when there is nothing extrudable.
+  #buildExtrudableProfile(sketch = this.activeSketch) {
+    const profiles = [];
+    const lineSegments = [];
+
+    for (const entity of sketch.entities) {
+      if (entity.type === 'rectangle') {
+        const { center = [0, 0], width, height } = entity.params;
+        if (width > 0 && height > 0) {
+          profiles.push(jscad.primitives.rectangle({ size: [width, height], center }));
+        }
+      } else if (entity.type === 'circle') {
+        const { center = [0, 0], radius } = entity.params;
+        if (radius > 0) {
+          profiles.push(jscad.primitives.circle({ radius, center, segments: 64 }));
+        }
+      } else if (entity.type === 'line') {
+        const { startPoint, endPoint } = entity.params;
+        if (startPoint && endPoint) {
+          lineSegments.push([startPoint, endPoint]);
+        }
+      }
+    }
+
+    // Try to turn connected line segments into a closed polygon profile.
+    const loop = this.#assembleClosedLoop(lineSegments);
+    if (loop && loop.length >= 3) {
+      try {
+        profiles.push(jscad.geometries.geom2.fromPoints(loop));
+      } catch (e) {
+        console.warn('[SketchManager] Could not build polygon from line segments:', e);
+      }
+    }
+
+    if (profiles.length === 0) return null;
+    return profiles.length === 1 ? profiles[0] : jscad.booleans.union(profiles);
+  }
+
+  // Chain 2D line segments into an ordered, closed loop of vertices.
+  // Returns null if the segments do not form a single closed loop.
+  #assembleClosedLoop(segments) {
+    if (!segments || segments.length < 3) return null;
+
+    const tol = 1e-6;
+    const eq = (a, b) => Math.abs(a[0] - b[0]) < tol && Math.abs(a[1] - b[1]) < tol;
+
+    const remaining = segments.map(s => [[...s[0]], [...s[1]]]);
+    const start = remaining[0][0];
+    const path = [start, remaining[0][1]];
+    remaining.splice(0, 1);
+
+    while (remaining.length > 0) {
+      const tail = path[path.length - 1];
+      let idx = -1;
+      let next = null;
+      for (let i = 0; i < remaining.length; i++) {
+        if (eq(remaining[i][0], tail)) { idx = i; next = remaining[i][1]; break; }
+        if (eq(remaining[i][1], tail)) { idx = i; next = remaining[i][0]; break; }
+      }
+      if (idx === -1) return null; // open or disconnected chain
+
+      remaining.splice(idx, 1);
+
+      // Closing segment consumed and loop returns to the start: done.
+      if (remaining.length === 0 && eq(next, start)) {
+        return path;
+      }
+      path.push(next);
+    }
+
+    // All segments consumed and the chain closes back to the start.
+    return eq(path[path.length - 1], start) ? path.slice(0, -1) : null;
+  }
+
+  // Reorient a solid that was extruded along +Z so it lies on the active
+  // sketch plane, respecting the plane offset. Uses a 4x4 transform that maps
+  // local axes (2D-x, 2D-y, extrude) onto the plane's world axes.
+  #orientToSketchPlane(solid, sketch = this.activeSketch) {
+    // extrudeLinear extrudes a profile from local z=0 along +z. The frame maps
+    // local (a, b, t) -> origin + a*u + b*v + t*w, placing and orienting the
+    // solid onto the sketch plane (base, offset, or arbitrary).
+    const frame = sketch.frame || basePlaneFrame(sketch.plane, sketch.offset || 0);
+    return jscad.transforms.transform(frameMatrix(frame), solid);
   }
 
   // [Selection management]
@@ -725,25 +1076,12 @@ class SketchManager {
   transformToSketchPlane(geometry) {
     if (!this.activeSketch) throw new Error('No active sketch');
     
+    const frame = this.activeSketch.frame || basePlaneFrame(this.activeSketch.plane, this.activeSketch.offset || 0);
+
     // Special handling for point geometry
     if (geometry.type === 'point') {
-      const position = geometry.position;
-      const offset = this.activeSketch.offset || 0;
-      let position3D;
-      
-      switch (this.activeSketch.plane) {
-        case 'yz':
-          position3D = [offset, position[0], position[1]];
-          break;
-        case 'xz':
-          position3D = [position[0], offset, position[1]];
-          break;
-        case 'xy':
-        default:
-          position3D = [position[0], position[1], offset];
-          break;
-      }
-      
+      const position3D = to3D(frame, geometry.position);
+
       // Create a small sphere to represent the point
       return jscad.primitives.sphere({ 
         center: position3D, 
@@ -754,22 +1092,22 @@ class SketchManager {
     
     // Special handling for sketch entities with points array (like circles, lines)
     if (geometry.points && Array.isArray(geometry.points)) {
-      // For sketch entities, we want to preserve the points array structure
-      // but make sure the metadata includes the sketch plane information
+      // For sketch entities, preserve the 2D points but also embed the 3D points
+      // mapped onto the sketch frame so the viewer can render the outline at the
+      // correct location/orientation for any plane (base, offset, or arbitrary).
       const offset = this.activeSketch.offset || 0;
-      
-      // Create a deep copy of the geometry to avoid modifying the original
+      const points3D = geometry.points.map(p => to3D(frame, p));
+
       const transformedGeometry = {
         ...geometry,
         metadata: {
           ...(geometry.metadata || {}),
           sketchOffset: offset,
-          sketchPlane: this.activeSketch.plane
+          sketchPlane: this.activeSketch.plane,
+          points3D
         }
       };
-      
-      console.log(`[SketchManager] Transformed sketch entity to plane ${this.activeSketch.plane} with offset ${offset}`);
-      
+
       return transformedGeometry;
     }
     
@@ -899,6 +1237,14 @@ class SketchManager {
   // Get the active sketch
   getActiveSketch() {
     return this.activeSketch;
+  }
+
+  // Look up an active-sketch entity by the model id it renders as. Used by the
+  // viewer to map a clicked 3D object back to a selectable sketch entity.
+  getActiveEntityByModelId(modelId) {
+    if (!this.activeSketch) return null;
+    const entity = this.activeSketch.entities.find(e => e.modelId === modelId);
+    return entity ? { id: entity.id, type: entity.type } : null;
   }
   
   // Get all available connection points

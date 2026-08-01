@@ -405,10 +405,19 @@ export default function CadInterface() {
     }
     
     window.addEventListener('openshape:requestCreateSketch', handleRequestCreateSketch)
+
+    // Add event listener for part insertion requests from the sidebar Parts Library
+    const handleRequestInsertPart = (event) => {
+      const { partType } = event.detail
+      handlePartClick(partType)
+    }
+
+    window.addEventListener('openshape:requestInsertPart', handleRequestInsertPart)
     
     return () => {
       window.removeEventListener('openshape:sketchModeChanged', handleSketchModeChanged)
       window.removeEventListener('openshape:requestCreateSketch', handleRequestCreateSketch)
+      window.removeEventListener('openshape:requestInsertPart', handleRequestInsertPart)
     }
   }, [])
 

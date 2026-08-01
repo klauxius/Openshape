@@ -126,6 +126,7 @@ const initializeTools = () => {
   registerUtilityTools();
   registerSketchingTools(); // Register 2D sketching tools
   registerCADOperationsTools(); // Register new structured CAD operations
+  exposeHeadlessApi(); // Expose a headless entry point for programmatic/agent use
 };
 
 /**
@@ -1414,9 +1415,17 @@ const registerCADOperationsTools = () => {
         offset: {
           type: 'number',
           description: 'Offset of the plane from origin'
+        },
+        planeId: {
+          type: 'string',
+          description: 'Optional id of a datum plane (from cadCreatePlane) to sketch on. When provided, plane/offset are ignored.'
+        },
+        parameters: {
+          type: 'object',
+          description: 'Optional named numeric parameters that entity dimensions and the extrude height can reference by name, e.g. { "width": 12, "height": 8, "depth": 6 }'
         }
       },
-      required: ['plane']
+      required: []
     },
     execute: async (params) => {
       console.log('Creating sketch with CADOperations:', params);
@@ -1790,6 +1799,260 @@ const registerCADOperationsTools = () => {
       };
     }
   });
+
+  // Register Add Rectangle to Sketch
+  mcpClient.registerTool({
+    name: 'cadAddRectangleToSketch',
+    description: 'Creates a rectangle in the active sketch (an extrudable closed profile)',
+    patterns: [
+      'create a rectangle in the sketch',
+      'add a rectangle to the sketch',
+      'draw a rectangle on the sketch',
+      'make a rectangle {width} by {height}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        center: {
+          type: 'array',
+          description: 'Center position of the rectangle [x, y] in the sketch plane',
+          items: { type: 'number' }
+        },
+        width: { type: 'number', description: 'Width of the rectangle' },
+        height: { type: 'number', description: 'Height of the rectangle' }
+      },
+      required: ['width', 'height']
+    },
+    execute: async (params) => {
+      console.log('Adding rectangle to sketch with CADOperations:', params);
+      const center = params.center || [0, 0];
+      const width = params.width || 10;
+      const height = params.height || 10;
+
+      const result = CADOperations.addSketchRectangle({ center, width, height });
+
+      return {
+        success: result.success,
+        message: result.success
+          ? `Added ${width}×${height} rectangle to sketch`
+          : result.error
+      };
+    }
+  });
+
+  // Register Add Line to Sketch
+  mcpClient.registerTool({
+    name: 'cadAddLineToSketch',
+    description: 'Adds a line segment to the active sketch by its two endpoints. Chain segments into a closed loop to form an extrudable profile.',
+    patterns: [
+      'add a line to the sketch',
+      'draw a line in the sketch from {startPoint} to {endPoint}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        startPoint: {
+          type: 'array',
+          description: 'Start point of the line [x, y] in the sketch plane',
+          items: { type: 'number' }
+        },
+        endPoint: {
+          type: 'array',
+          description: 'End point of the line [x, y] in the sketch plane',
+          items: { type: 'number' }
+        }
+      },
+      required: ['startPoint', 'endPoint']
+    },
+    execute: async (params) => {
+      console.log('Adding line to sketch with CADOperations:', params);
+      const result = CADOperations.addSketchLine({
+        startPoint: params.startPoint || [0, 0],
+        endPoint: params.endPoint || [10, 0]
+      });
+
+      return {
+        success: result.success,
+        message: result.success ? result.message : result.error,
+        entityId: result.entityId
+      };
+    }
+  });
+
+  // Register Create Datum Plane
+  mcpClient.registerTool({
+    name: 'cadCreatePlane',
+    description: 'Defines a new datum/reference plane. Either an offset plane (parallel to a base plane at a signed distance) or a general plane from an origin point and a normal vector. Returns a planeId to pass to cadCreateSketch.',
+    patterns: [
+      'create a plane offset {offset} from {basePlane}',
+      'add a datum plane',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        basePlane: { type: 'string', description: 'Base plane for an offset plane (xy, yz, or xz)', enum: ['xy', 'yz', 'xz'] },
+        offset: { type: 'number', description: 'Signed offset distance from the base plane, along its normal' },
+        origin: { type: 'array', description: 'Origin [x, y, z] for a general plane', items: { type: 'number' } },
+        normal: { type: 'array', description: 'Normal vector [x, y, z] for a general plane', items: { type: 'number' } },
+        name: { type: 'string', description: 'Optional name for the plane' }
+      },
+      required: []
+    },
+    execute: async (params) => {
+      const result = CADOperations.createPlane(params);
+      return {
+        success: result.success,
+        planeId: result.planeId,
+        message: result.success ? result.message : result.error
+      };
+    }
+  });
+
+  // Register List Datum Planes
+  mcpClient.registerTool({
+    name: 'cadListPlanes',
+    description: 'Lists the datum planes that have been defined',
+    patterns: ['list planes', 'list datum planes'],
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      const result = CADOperations.listPlanes();
+      return {
+        success: result.success,
+        planes: result.planes,
+        message: result.success ? `${result.planes.length} datum plane(s)` : result.error
+      };
+    }
+  });
+
+  // Register Set Sketch Parameter (parametric variable)
+  mcpClient.registerTool({
+    name: 'cadSetSketchParameter',
+    description: 'Sets a named parameter on the active sketch and rebuilds every entity dimension and the extruded solid that references it. Bind a dimension to a parameter by passing its name as a string, e.g. cadAddRectangleToSketch({ width: "boxWidth" }).',
+    patterns: [
+      'set parameter {name} to {value}',
+      'change {name} to {value}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Parameter name' },
+        value: { type: 'number', description: 'New numeric value' }
+      },
+      required: ['name', 'value']
+    },
+    execute: async (params) => {
+      const result = CADOperations.setSketchParameter(params);
+      return {
+        success: result.success,
+        message: result.success ? `Set ${params.name} = ${params.value}` : result.error,
+        parameters: result.parameters
+      };
+    }
+  });
+
+  // Register Add Constraint (geometric relation)
+  mcpClient.registerTool({
+    name: 'cadAddConstraint',
+    description: 'Adds a geometric relation to the active sketch and solves it. Types: coincident (two point ids), horizontal/vertical (a line id or two point ids), parallel/perpendicular/equal (two line ids), distance (a line id + numeric value or parameter name), fixed (a point id). Lines must be point-connected (created via cadConnectPoints).',
+    patterns: [
+      'make {a} and {b} coincident',
+      'make {line} horizontal',
+      'make {line1} perpendicular to {line2}',
+    ],
+    parameters: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          description: 'Constraint type',
+          enum: ['coincident', 'horizontal', 'vertical', 'parallel', 'perpendicular', 'equal', 'distance', 'length', 'fixed']
+        },
+        entities: {
+          type: 'array',
+          description: 'Entity ids the constraint applies to (point ids or line ids depending on type)',
+          items: { type: 'string' }
+        },
+        value: {
+          type: ['number', 'string'],
+          description: 'For distance/length: the target length as a number, or the name of a sketch parameter'
+        }
+      },
+      required: ['type', 'entities']
+    },
+    execute: async (params) => {
+      const result = CADOperations.addConstraint(params);
+      return {
+        success: result.success,
+        constraintId: result.constraintId,
+        message: result.success ? result.message : result.error
+      };
+    }
+  });
+
+  // Register List Constraints
+  mcpClient.registerTool({
+    name: 'cadListConstraints',
+    description: 'Lists the geometric constraints on the active sketch',
+    patterns: ['list constraints', 'list relations'],
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      const result = CADOperations.getConstraints();
+      return {
+        success: result.success,
+        constraints: result.constraints,
+        message: result.success ? `${result.constraints.length} constraint(s)` : result.error
+      };
+    }
+  });
+
+  // Register Get Sketch Parameters
+  mcpClient.registerTool({
+    name: 'cadGetSketchParameters',
+    description: 'Returns the named parameters defined on the active sketch',
+    patterns: ['list sketch parameters', 'get parameters'],
+    parameters: { type: 'object', properties: {} },
+    execute: async () => {
+      const result = CADOperations.getSketchParameters();
+      return {
+        success: result.success,
+        parameters: result.parameters,
+        message: result.success ? `Parameters: ${JSON.stringify(result.parameters)}` : result.error
+      };
+    }
+  });
+};
+
+// Expose a minimal headless entry point so a non-GUI agent (or automated
+// test) can drive the MCP tools programmatically once the app has mounted and
+// initializeTools() has run. Example:
+//   await window.openshapeCAD.callTool('cadCreateSketch', { plane: 'xy' })
+//   await window.openshapeCAD.callTool('cadAddRectangleToSketch', { width: 10, height: 6 })
+//   await window.openshapeCAD.callTool('cadExtrudeSketch', { height: 5 })
+const exposeHeadlessApi = () => {
+  if (typeof window === 'undefined') return;
+  window.openshapeCAD = {
+    callTool: (name, parameters = {}) => mcpClient.executeToolCall({ name, parameters }),
+    listTools: () => mcpClient.tools.map(t => ({ name: t.name, description: t.description })),
+    getToolDefinitions: () => mcpClient.getToolDefinitions(),
+    // Inspection helpers (useful for agents/tests to confirm results headlessly)
+    listModels: () => Object.values(modelStore.models).map(m => ({ id: m.id, name: m.name })),
+    getModel: (id) => modelStore.getModel(id),
+    measureModel: (id) => {
+      const model = modelStore.getModel(id);
+      if (!model || !model.geometry) return null;
+      try {
+        const [min, max] = jscad.measurements.measureBoundingBox(model.geometry);
+        return {
+          min,
+          max,
+          size: [max[0] - min[0], max[1] - min[1], max[2] - min[2]]
+        };
+      } catch (error) {
+        return { error: error.message };
+      }
+    },
+    client: mcpClient
+  };
 };
 
 // Export initializeTools as the default export

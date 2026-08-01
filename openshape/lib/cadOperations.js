@@ -4,6 +4,7 @@
 import * as jscad from '@jscad/modeling';
 import { modelStore, notifyModelChanged } from './mcpTools';
 import sketchManager from './sketchManager';
+import planeManager from './planeManager';
 
 // Notify observers about operation history changes
 const notifyOperationHistoryChanged = () => {
@@ -260,10 +261,10 @@ class CreateSketchOperation extends CADOperation {
   }
   
   execute() {
-    const { plane = 'xy', offset = 0, name } = this.params;
+    const { plane = 'xy', offset = 0, parameters, planeId, frame, name } = this.params;
     
     try {
-      const sketch = sketchManager.createSketch({ plane, offset });
+      const sketch = sketchManager.createSketch({ plane, offset, parameters, planeId, frame });
       
       // Add to history with undo/redo
       operationHistory.addOperation({
@@ -487,6 +488,53 @@ class AddSketchRectangleOperation extends CADOperation {
   toJscadCode() {
     const { center = [0, 0], width = 10, height = 10 } = this.params;
     return `// Add rectangle with center [${center[0]}, ${center[1]}] and dimensions ${width}×${height} to sketch\n`;
+  }
+}
+
+class AddSketchLineOperation extends CADOperation {
+  constructor(params = {}) {
+    super(params);
+    this.type = 'addSketchLine';
+    this.description = 'Add line to sketch';
+  }
+
+  execute() {
+    const { startPoint = [0, 0], endPoint = [10, 0] } = this.params;
+
+    try {
+      if (!sketchManager.getActiveSketch()) {
+        throw new Error('No active sketch');
+      }
+
+      const entity = sketchManager.addEntity('line', { startPoint, endPoint });
+
+      // Add to history with undo/redo
+      operationHistory.addOperation({
+        type: this.type,
+        params: this.params,
+        entityId: entity.id,
+        undo: () => {
+          sketchManager.deleteEntity(entity.id);
+        },
+        redo: () => {
+          sketchManager.addEntity('line', { startPoint, endPoint });
+        }
+      });
+
+      return {
+        entityId: entity.id,
+        success: true,
+        message: `Added line from [${startPoint.join(', ')}] to [${endPoint.join(', ')}] to sketch`
+      };
+    } catch (error) {
+      console.error('Failed to add line to sketch:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  toJscadCode() {
+    const { startPoint = [0, 0], endPoint = [10, 0] } = this.params;
+    return `// Add line from [${startPoint[0]}, ${startPoint[1]}] to [${endPoint[0]}, ${endPoint[1]}] to sketch\n`;
   }
 }
 
@@ -854,7 +902,88 @@ export const CADOperations = {
   connectPoints: (params) => new ConnectPointsOperation(params).execute(),
   addSketchCircle: (params) => new AddSketchCircleOperation(params).execute(),
   addSketchRectangle: (params) => new AddSketchRectangleOperation(params).execute(),
+  addSketchLine: (params) => new AddSketchLineOperation(params).execute(),
   extrudeSketch: (params) => new ExtrudeSketchOperation(params).execute(),
+
+  // Datum planes
+  createPlane: (params = {}) => {
+    try {
+      let plane;
+      if (params.normal) {
+        plane = planeManager.createPlaneFromNormal({
+          origin: params.origin || [0, 0, 0],
+          normal: params.normal,
+          name: params.name
+        });
+      } else {
+        plane = planeManager.createOffsetPlane({
+          basePlane: params.basePlane || 'xy',
+          offset: params.offset || 0,
+          name: params.name
+        });
+      }
+      return {
+        success: true,
+        planeId: plane.id,
+        name: plane.name,
+        message: `Created datum plane ${plane.name} (${plane.id})`
+      };
+    } catch (error) {
+      console.error('Failed to create plane:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  listPlanes: () => {
+    try {
+      return { success: true, planes: planeManager.list() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Parametric sketch variables
+  setSketchParameter: (params = {}) => {
+    try {
+      const values = sketchManager.setParameter(params.name, params.value);
+      return {
+        success: true,
+        parameters: values,
+        message: `Set parameter ${params.name} = ${params.value}`
+      };
+    } catch (error) {
+      console.error('Failed to set sketch parameter:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  getSketchParameters: () => {
+    try {
+      return { success: true, parameters: sketchManager.getParameters() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  // Geometric constraints / relations
+  addConstraint: (params = {}) => {
+    try {
+      const constraint = sketchManager.addConstraint(params.type, params.entities || [], params.value);
+      return {
+        success: true,
+        constraintId: constraint.id,
+        message: `Added ${params.type} constraint`
+      };
+    } catch (error) {
+      console.error('Failed to add constraint:', error);
+      return { success: false, error: error.message };
+    }
+  },
+  getConstraints: () => {
+    try {
+      return { success: true, constraints: sketchManager.getConstraints() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
   
   // Point management
   getConnectionPoints: () => sketchManager.getConnectionPoints(),
